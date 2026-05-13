@@ -1,3 +1,6 @@
 import { createProgram } from './cli.js'
 
-await createProgram().parseAsync(process.argv)
+createProgram().parseAsync(process.argv).catch((error) => {
+  console.error(error)
+  process.exitCode = 1
+})

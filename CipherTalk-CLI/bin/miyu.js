@@ -7,8 +7,14 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const distEntry = join(root, 'dist', 'index.js')
 
 if (existsSync(distEntry)) {
-  await import(pathToFileURL(distEntry).href)
+  import(pathToFileURL(distEntry).href).catch(handleFatalError)
 } else {
-  await import('tsx/esm')
-  await import(pathToFileURL(join(root, 'src', 'index.ts')).href)
+  import('tsx/esm')
+    .then(() => import(pathToFileURL(join(root, 'src', 'index.ts')).href))
+    .catch(handleFatalError)
+}
+
+function handleFatalError(error) {
+  console.error(error)
+  process.exitCode = 1
 }

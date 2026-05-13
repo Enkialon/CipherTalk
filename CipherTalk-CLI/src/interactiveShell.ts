@@ -40,6 +40,24 @@ type ParsedOptions = {
   positional: string[]
 }
 
+const ANSI = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  cyan: '\x1b[38;5;51m',
+  blue: '\x1b[38;5;39m',
+  teal: '\x1b[38;5;43m',
+  mint: '\x1b[38;5;121m',
+  white: '\x1b[97m',
+  gray: '\x1b[38;5;245m',
+  amber: '\x1b[38;5;221m'
+} as const
+
+function paint(text: string, ...codes: string[]): string {
+  if (process.env.NO_COLOR) return text
+  return `${codes.join('')}${text}${ANSI.reset}`
+}
+
 export function getInteractiveCommands(): InteractiveCommand[] {
   return [...COMMANDS]
 }
@@ -135,21 +153,21 @@ function showCommandList(): string {
 
 export function renderWelcomeScreen(): string {
   return [
-    '┌──────────────────────────────────────────────┐',
-    '│  Welcome to CipherTalk CLI                   │',
-    '│  欢迎使用密语命令行工具                      │',
-    '└──────────────────────────────────────────────┘',
+    paint('┌──────────────────────────────────────────────┐', ANSI.cyan),
+    `${paint('│', ANSI.cyan)}  ${paint('Welcome to CipherTalk CLI', ANSI.bold, ANSI.white)}                   ${paint('│', ANSI.cyan)}`,
+    `${paint('│', ANSI.cyan)}  ${paint('欢迎使用密语命令行工具', ANSI.mint)}                      ${paint('│', ANSI.cyan)}`,
+    paint('└──────────────────────────────────────────────┘', ANSI.cyan),
     '',
-    ' ██████╗ ██╗ ██████╗  ██╗  ██╗ ███████╗ ██████╗  ████████╗  █████╗  ██╗      ██╗  ██╗',
-    '██╔════╝ ██║ ██╔══██╗ ██║  ██║ ██╔════╝ ██╔══██╗ ╚══██╔══╝ ██╔══██╗ ██║      ██║ ██╔╝',
-    '██║      ██║ ██████╔╝ ███████║ █████╗   ██████╔╝    ██║    ███████║ ██║      █████╔╝',
-    '██║      ██║ ██╔═══╝  ██╔══██║ ██╔══╝   ██╔══██╗    ██║    ██╔══██║ ██║      ██╔═██╗',
-    '╚██████╗ ██║ ██║      ██║  ██║ ███████╗ ██║  ██║    ██║    ██║  ██║ ███████╗ ██║  ██╗',
-    ' ╚═════╝ ╚═╝ ╚═╝      ╚═╝  ╚═╝ ╚══════╝ ╚═╝  ╚═╝    ╚═╝    ╚═╝  ╚═╝ ╚══════╝ ╚═╝  ╚═╝',
+    paint(' ██████╗ ██╗ ██████╗  ██╗  ██╗ ███████╗ ██████╗  ████████╗  █████╗  ██╗      ██╗  ██╗', ANSI.blue),
+    paint('██╔════╝ ██║ ██╔══██╗ ██║  ██║ ██╔════╝ ██╔══██╗ ╚══██╔══╝ ██╔══██╗ ██║      ██║ ██╔╝', ANSI.blue),
+    paint('██║      ██║ ██████╔╝ ███████║ █████╗   ██████╔╝    ██║    ███████║ ██║      █████╔╝', ANSI.teal),
+    paint('██║      ██║ ██╔═══╝  ██╔══██║ ██╔══╝   ██╔══██╗    ██║    ██╔══██║ ██║      ██╔═██╗', ANSI.teal),
+    paint('╚██████╗ ██║ ██║      ██║  ██║ ███████╗ ██║  ██║    ██║    ██║  ██║ ███████╗ ██║  ██╗', ANSI.cyan),
+    paint(' ╚═════╝ ╚═╝ ╚═╝      ╚═╝  ╚═╝ ╚══════╝ ╚═╝  ╚═╝    ╚═╝    ╚═╝  ╚═╝ ╚══════╝ ╚═╝  ╚═╝', ANSI.cyan, ANSI.dim),
     '',
-    '本地微信数据命令行工作台',
+    paint('本地微信数据命令行工作台', ANSI.gray),
     '',
-    '按 Enter 继续'
+    paint('按 Enter 继续', ANSI.amber)
   ].join('\n')
 }
 
