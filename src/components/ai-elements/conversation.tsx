@@ -5,16 +5,22 @@ import { Button } from "@/components/ui/aie-button";
 import { cn } from "@/lib/utils";
 import { ArrowDownIcon } from "lucide-react";
 import type { ComponentProps } from "react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
 export type ConversationProps = ComponentProps<typeof StickToBottom>;
+
+const STREAMING_RESIZE_ANIMATION = {
+  damping: 0.76,
+  stiffness: 0.08,
+  mass: 1.1,
+};
 
 export const Conversation = ({ className, ...props }: ConversationProps) => (
   <StickToBottom
     className={cn("relative flex-1 overflow-y-hidden", className)}
     initial="instant"
-    resize="instant"
+    resize={STREAMING_RESIZE_ANIMATION}
     role="log"
     {...props}
   />
@@ -28,6 +34,7 @@ export const ConversationContent = ({
   className,
   children,
   scrollClassName,
+  style,
   ...props
 }: ConversationContentProps) => {
   const context = useStickToBottomContext();
@@ -37,11 +44,12 @@ export const ConversationContent = ({
       className={cn("h-full min-h-0 w-full", scrollClassName)}
       ref={(node) => context.scrollRef(node)}
       size={56}
-      style={{ scrollbarGutter: "stable both-edges" }}
+      style={{ overflowAnchor: "none", scrollbarGutter: "stable both-edges" }}
     >
       <div
         className={cn("flex flex-col gap-8", className)}
         ref={(node) => context.contentRef(node)}
+        style={{ overflowAnchor: "none", ...style }}
         {...props}
       >
         {typeof children === "function" ? children(context) : children}
@@ -99,7 +107,7 @@ export const ConversationAutoScroll = ({
   const { scrollToBottom } = useStickToBottomContext();
   const didMountRef = useRef(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!didMountRef.current) {
       didMountRef.current = true;
       return;
@@ -107,48 +115,6 @@ export const ConversationAutoScroll = ({
     if (!enabled) return;
     void scrollToBottom({ animation: "instant", ignoreEscapes: true });
   }, [enabled, scrollToBottom, trigger]);
-
-  return null;
-};
-
-export type ConversationFocusLatestUserProps = {
-  enabled?: boolean;
-  trigger: unknown;
-  topOffsetRatio?: number;
-};
-
-export const ConversationFocusLatestUser = ({
-  enabled = true,
-  trigger,
-  topOffsetRatio = 0.18,
-}: ConversationFocusLatestUserProps) => {
-  const context = useStickToBottomContext();
-  const { contentRef, scrollRef, stopScroll } = context;
-  const didMountRef = useRef(false);
-
-  useEffect(() => {
-    if (!didMountRef.current) {
-      didMountRef.current = true;
-      return;
-    }
-    if (!enabled) return;
-
-    const frame = window.requestAnimationFrame(() => {
-      const scrollElement = scrollRef.current;
-      const contentElement = contentRef.current;
-      if (!scrollElement || !contentElement) return;
-
-      const userMessages = contentElement.querySelectorAll<HTMLElement>('[data-agent-message-role="user"]');
-      const latest = userMessages[userMessages.length - 1];
-      if (!latest) return;
-
-      stopScroll();
-      const targetTop = Math.max(0, latest.offsetTop - scrollElement.clientHeight * topOffsetRatio);
-      scrollElement.scrollTo({ top: targetTop, behavior: "smooth" });
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [contentRef, enabled, scrollRef, stopScroll, topOffsetRatio, trigger]);
 
   return null;
 };

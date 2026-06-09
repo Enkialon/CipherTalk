@@ -19,12 +19,13 @@ import {
   ChevronRightIcon,
   CodeIcon,
   CopyIcon,
+  DownloadIcon,
   EyeIcon,
   PaperclipIcon,
   XIcon,
 } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
-import { createContext, memo, useContext, useEffect, useState } from "react";
+import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { bundledLanguages, type BundledLanguage } from "shiki";
 import {
@@ -44,7 +45,7 @@ import {
   WebPreviewNavigation,
   WebPreviewUrl,
 } from "./web-preview";
-import { ChartBlock, parseChartOption } from "./chart-block";
+import { ChartBlock, type ChartBlockHandle, parseChartOption } from "./chart-block";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -411,11 +412,22 @@ const MessageCode = ({ children, className, ...props }: MessageCodeProps) => {
   const canRenderTerminal = isTerminalCode(rawLanguage);
   const chartOption = isChartCode(rawLanguage) ? parseChartOption(code) : null;
   const language = normalizeCodeLanguage(canPreviewHtml && !rawLanguage ? "html" : rawLanguage);
+  const chartRef = useRef<ChartBlockHandle | null>(null);
   const handleCopy = async () => {
     if (typeof window === "undefined" || !navigator?.clipboard?.writeText) return;
     await navigator.clipboard.writeText(code);
     setIsCopied(true);
     window.setTimeout(() => setIsCopied(false), 2000);
+  };
+  const handleDownloadChart = () => {
+    const dataUrl = chartRef.current?.getDataURL();
+    if (!dataUrl) return;
+    const link = document.createElement("a");
+    link.href = dataUrl;
+    link.download = `ai-chart-${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -436,6 +448,14 @@ const MessageCode = ({ children, className, ...props }: MessageCodeProps) => {
               tooltip={showPreview ? "查看代码" : "预览 HTML"}
             />
           )}
+          {chartOption && (
+            <ArtifactAction
+              icon={DownloadIcon}
+              label="下载图表"
+              onClick={handleDownloadChart}
+              tooltip="下载图表"
+            />
+          )}
           <ArtifactAction
             icon={isCopied ? CheckIcon : CopyIcon}
             label="复制代码"
@@ -446,7 +466,7 @@ const MessageCode = ({ children, className, ...props }: MessageCodeProps) => {
       </ArtifactHeader>
       <ArtifactContent className="p-0">
         {chartOption ? (
-          <ChartBlock className="p-3" option={chartOption} />
+          <ChartBlock className="p-3" option={chartOption} ref={chartRef} />
         ) : showPreview && canPreviewHtml ? (
           <WebPreview className="rounded-none border-0" defaultUrl="about:srcdoc">
             <WebPreviewNavigation>

@@ -11,9 +11,9 @@ import { Sources, SourcesContent, SourcesTrigger } from '@/components/ai-element
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import {
   Conversation,
+  ConversationAutoScroll,
   ConversationContent,
   ConversationEmptyState,
-  ConversationFocusLatestUser,
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
 import { Message, MessageAction, MessageActions, MessageAttachment, MessageAttachments, MessageContent, MessageResponse } from '@/components/ai-elements/message'
@@ -1463,6 +1463,23 @@ export default function AgentPage() {
   const { messages, sendMessage, setMessages, status, stop } = useChat({ transport })
   const [modelOpen, setModelOpen] = useState(false)
   const busy = status === 'submitted' || status === 'streaming'
+  const latestUserMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'user') return messages[i].id
+    }
+    return ''
+  }, [messages])
+  const latestUserTargetScrollTop = useCallback((_targetScrollTop: number, context: {
+    scrollElement: HTMLElement
+    contentElement: HTMLElement
+  }) => {
+    const userMessages = context.contentElement.querySelectorAll<HTMLElement>('[data-agent-message-role="user"]')
+    const latest = userMessages[userMessages.length - 1]
+    if (!latest) return _targetScrollTop
+    const topOffset = Math.min(160, Math.max(72, context.scrollElement.clientHeight * 0.18))
+    return Math.max(0, Math.min(_targetScrollTop, latest.offsetTop - topOffset))
+  }, [])
+  const shouldAnchorLatestUser = busy && !!latestUserMessageId
   const lastAssistantMessageHasDelegateTool = useMemo(() => {
     const last = messages[messages.length - 1]
     return !!last && last.role === 'assistant' && last.parts.some((part) => (
@@ -1978,11 +1995,11 @@ export default function AgentPage() {
           )}
         </div>
       </div>
-      <Conversation className="min-h-0 flex-1">
-        <ConversationFocusLatestUser
-          enabled={messages[messages.length - 1]?.role === 'user'}
-          trigger={messages[messages.length - 1]?.id || messages.length}
-        />
+      <Conversation
+        className="min-h-0 flex-1"
+        targetScrollTop={shouldAnchorLatestUser ? latestUserTargetScrollTop : undefined}
+      >
+        <ConversationAutoScroll enabled={shouldAnchorLatestUser} trigger={latestUserMessageId} />
         <ConversationContent className="mx-auto w-full min-w-80 max-w-[82%] py-4">
           {messages.length === 0 ? (
             <ConversationEmptyState

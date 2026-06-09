@@ -4,11 +4,15 @@ import { cn } from "@/lib/utils";
 import * as echarts from "echarts";
 import type { ECharts, EChartsOption } from "echarts";
 import { AlertCircleIcon } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 
 export type ChartBlockProps = {
   className?: string;
   option: EChartsOption;
+};
+
+export type ChartBlockHandle = {
+  getDataURL: () => string | null;
 };
 
 function isUsableChartOption(option: unknown): option is EChartsOption {
@@ -26,10 +30,26 @@ export function parseChartOption(code: string): EChartsOption | null {
   }
 }
 
-export function ChartBlock({ className, option }: ChartBlockProps) {
+export const ChartBlock = forwardRef<ChartBlockHandle, ChartBlockProps>(function ChartBlock(
+  { className, option },
+  ref
+) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ECharts | null>(null);
   const optionKey = useMemo(() => JSON.stringify(option), [option]);
+
+  useImperativeHandle(ref, () => ({
+    getDataURL: () => {
+      const chart = chartRef.current;
+      if (!chart || chart.isDisposed()) return null;
+      return chart.getDataURL({
+        backgroundColor: "#ffffff",
+        excludeComponents: ["toolbox"],
+        pixelRatio: 2,
+        type: "png",
+      });
+    },
+  }), []);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -66,4 +86,4 @@ export function ChartBlock({ className, option }: ChartBlockProps) {
   }
 
   return <div aria-label="AI 生成图表" className={cn("h-full min-h-80 w-full", className)} ref={rootRef} role="img" />;
-}
+});
