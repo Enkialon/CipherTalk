@@ -19,7 +19,7 @@ const DEFAULT_TOOL_TIMEOUT_MS = 60_000
 const TOOL_TIMEOUT_OVERRIDES: Record<string, number> = {
   semantic_search: 240_000,
   search_messages: 240_000,
-  delegate_analysis: 360_000, // 子 Agent 整轮（多步 + 可能触发首次重建），给更长上限
+  delegate_analysis: 600_000, // 子 Agent 批量整轮（最多 4 个并发子任务 + 可能触发首次重建），给更长上限
 }
 
 function stepFingerprint(step: StepResult<ToolSet>): string | null {

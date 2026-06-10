@@ -66,6 +66,9 @@ export interface AgentProgressEvent {
   detail?: string
   toolName?: string
   toolCallId?: string
+  parentToolCallId?: string
+  subTaskId?: string
+  subTaskTitle?: string
   sessionId?: string
   elapsedMs?: number
   messagesScanned?: number

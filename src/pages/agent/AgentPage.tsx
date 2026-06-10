@@ -380,22 +380,40 @@ function toolPartProgressKey(part: unknown, toolName: string) {
   return toolProgressKey(toolName, toolCallId)
 }
 
-function getDelegateTask(part: unknown): string | undefined {
+function getDelegateTasks(part: unknown): string[] {
   const input = (part as { input?: unknown }).input
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return []
+  const tasks = (input as { tasks?: unknown }).tasks
+  if (Array.isArray(tasks)) {
+    return tasks
+      .map((item) => {
+        if (!item || typeof item !== 'object') return ''
+        const task = (item as { task?: unknown }).task
+        return typeof task === 'string' ? task.trim() : ''
+      })
+      .filter(Boolean)
+  }
   const task = (input as { task?: unknown }).task
-  return typeof task === 'string' && task.trim() ? task.trim() : undefined
+  return typeof task === 'string' && task.trim() ? [task.trim()] : []
 }
 
-const SUB_AGENT_PROGRESS_LIMIT = 12
+const SUB_AGENT_PROGRESS_LIMIT = 48
 const AGENT_PENDING_TITLE = '正在准备请求'
 
+function subAgentProgressGroupKey(progress: AgentProgressEvent) {
+  return [
+    progress.parentToolCallId || 'delegate',
+    progress.subTaskId || progress.subTaskTitle || 'single',
+  ].join(':')
+}
+
 function subAgentProgressKey(progress: AgentProgressEvent) {
-  if (progress.toolCallId) return `call:${progress.toolCallId}`
+  const groupKey = subAgentProgressGroupKey(progress)
+  if (progress.toolCallId) return `${groupKey}:call:${progress.toolCallId}`
   if (progress.toolName && (progress.stage === 'tool_started' || progress.stage === 'tool_finished' || progress.stage === 'error')) {
-    return `tool:${progress.depth ?? 0}:${progress.toolName}`
+    return `${groupKey}:tool:${progress.depth ?? 0}:${progress.toolName}`
   }
-  return `event:${progress.depth ?? 0}:${progress.stage}:${progress.title}:${progress.sessionId ?? ''}`
+  return `${groupKey}:event:${progress.depth ?? 0}:${progress.stage}:${progress.title}:${progress.sessionId ?? ''}`
 }
 
 function mergeSubAgentProgress(prev: AgentProgressEvent[], progress: AgentProgressEvent) {
@@ -503,11 +521,48 @@ function subAgentPanelTitle(latest: AgentProgressEvent) {
   return '子助手运行中'
 }
 
-function SubAgentProgressPanel({ events, task }: { events: AgentProgressEvent[]; task?: string }) {
+type SubAgentProgressGroup = {
+  key: string
+  title: string
+  events: AgentProgressEvent[]
+  latest: AgentProgressEvent
+}
+
+function groupSubAgentProgress(events: AgentProgressEvent[]): SubAgentProgressGroup[] {
+  const groups = new Map<string, AgentProgressEvent[]>()
+  for (const event of events) {
+    const key = subAgentProgressGroupKey(event)
+    groups.set(key, [...(groups.get(key) || []), event])
+  }
+  return Array.from(groups.entries()).map(([key, groupEvents], index) => {
+    const latest = groupEvents[groupEvents.length - 1]
+    return {
+      key,
+      title: latest.subTaskTitle || `子任务 ${index + 1}`,
+      events: groupEvents,
+      latest,
+    }
+  })
+}
+
+function formatSubAgentPanelTitle(groups: SubAgentProgressGroup[], latest: AgentProgressEvent) {
+  if (groups.length <= 1) return subAgentPanelTitle(latest)
+  const finished = groups.filter((group) => group.latest.stage === 'run_finished').length
+  const failed = groups.filter((group) => group.latest.stage === 'error').length
+  if (finished + failed >= groups.length) {
+    return failed > 0 ? `子助手完成 ${finished}/${groups.length}` : `子助手已完成 ${groups.length}/${groups.length}`
+  }
+  return `${groups.length} 个子任务并行分析中`
+}
+
+function SubAgentProgressPanel({ events, tasks }: { events: AgentProgressEvent[]; tasks?: string[] }) {
   if (events.length === 0) return null
   const latestKey = subAgentProgressKey(events[events.length - 1])
   const latest = events[events.length - 1]
   const toolCount = new Set(events.map((event) => event.toolName).filter(Boolean)).size
+  const groups = groupSubAgentProgress(events)
+  const finishedGroups = groups.filter((group) => group.latest.stage === 'run_finished').length
+  const failedGroups = groups.filter((group) => group.latest.stage === 'error').length
 
   return (
     <section
@@ -516,58 +571,86 @@ function SubAgentProgressPanel({ events, task }: { events: AgentProgressEvent[];
     >
       <div className="mb-2 flex min-w-0 items-center gap-2 font-medium text-foreground">
         <Sparkles className="size-3.5 shrink-0" />
-        <span className="shrink-0">{subAgentPanelTitle(latest)}</span>
+        <span className="shrink-0">{formatSubAgentPanelTitle(groups, latest)}</span>
         <span className="min-w-0 truncate text-muted-foreground font-normal">
           {formatSubAgentProgressTitle(latest)}
         </span>
       </div>
-      {task && (
+      {tasks && tasks.length > 0 && (
         <div className="mb-2 rounded-(--agent-radius,12px) bg-muted/50 px-2 py-1.5 text-muted-foreground">
           <div className="mb-0.5 text-[11px] text-foreground">委托任务</div>
-          <div className="line-clamp-3 whitespace-pre-wrap wrap-break-word">{task}</div>
+          {tasks.length === 1 ? (
+            <div className="line-clamp-3 whitespace-pre-wrap wrap-break-word">{tasks[0]}</div>
+          ) : (
+            <ol className="list-inside list-decimal space-y-0.5">
+              {tasks.slice(0, 4).map((task, index) => (
+                <li className="line-clamp-2 whitespace-pre-wrap wrap-break-word" key={`${index}-${task}`}>
+                  {task}
+                </li>
+              ))}
+            </ol>
+          )}
         </div>
       )}
       <div className="mb-2 flex flex-wrap gap-1">
         <span className="rounded-full bg-muted/60 px-2 py-0.5 text-muted-foreground">{events.length} 条进度</span>
+        {groups.length > 1 && <span className="rounded-full bg-muted/60 px-2 py-0.5 text-muted-foreground">完成 {finishedGroups}/{groups.length}</span>}
+        {failedGroups > 0 && <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-destructive">失败 {failedGroups}</span>}
         {toolCount > 0 && <span className="rounded-full bg-muted/60 px-2 py-0.5 text-muted-foreground">{toolCount} 个工具</span>}
         <span className="rounded-full bg-muted/60 px-2 py-0.5 text-muted-foreground">最近 {formatProgressTime(latest.at)}</span>
       </div>
-      <div className="space-y-1">
-        {events.map((progress) => {
-          const Icon = subAgentProgressIcon(progress)
-          const itemKey = subAgentProgressKey(progress)
-          const meta = formatSubAgentProgressMeta(progress)
-          const active = itemKey === latestKey
-            && progress.stage !== 'tool_finished'
-            && progress.stage !== 'run_finished'
-            && progress.stage !== 'error'
+      <div className="space-y-2">
+        {groups.map((group) => {
+          const groupLatestKey = subAgentProgressKey(group.latest)
           return (
-            <div
-              className="flex min-w-0 items-start gap-2 rounded-(--agent-radius,12px) px-1.5 py-1 text-muted-foreground"
-              key={itemKey}
-            >
-              <span className="relative mt-0.5 inline-flex size-4 shrink-0 items-center justify-center">
-                <Icon className="size-3.5" />
-                <span className={`absolute -right-0.5 -top-0.5 size-1.5 rounded-full ${subAgentProgressDotClass(progress)} ${active ? 'animate-pulse' : ''}`} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="truncate text-foreground">{formatSubAgentProgressTitle(progress)}</span>
-                  <span className="shrink-0 text-[10px] text-muted-foreground">{formatProgressTime(progress.at)}</span>
+            <div className="rounded-(--agent-radius,12px) bg-muted/30 px-2 py-1.5" key={group.key}>
+              {groups.length > 1 && (
+                <div className="mb-1 flex min-w-0 items-center gap-2 font-medium text-foreground">
+                  <span className={`size-1.5 shrink-0 rounded-full ${subAgentProgressDotClass(group.latest)}`} />
+                  <span className="min-w-0 flex-1 truncate">{group.title}</span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">{formatSubAgentStage(group.latest)}</span>
                 </div>
-                {meta.length > 0 && (
-                  <div className="mt-0.5 flex min-w-0 flex-wrap gap-1">
-                    {meta.map((item) => (
-                      <span
-                        className="max-w-full truncate rounded-(--agent-radius,12px) bg-muted/60 px-1.5 py-0.5"
-                        key={item}
-                        title={item}
-                      >
-                        {item}
+              )}
+              <div className="space-y-1">
+                {group.events.slice(groups.length > 1 ? -4 : -SUB_AGENT_PROGRESS_LIMIT).map((progress) => {
+                  const Icon = subAgentProgressIcon(progress)
+                  const itemKey = subAgentProgressKey(progress)
+                  const meta = formatSubAgentProgressMeta(progress)
+                  const active = (itemKey === latestKey || itemKey === groupLatestKey)
+                    && progress.stage !== 'tool_finished'
+                    && progress.stage !== 'run_finished'
+                    && progress.stage !== 'error'
+                  return (
+                    <div
+                      className="flex min-w-0 items-start gap-2 rounded-(--agent-radius,12px) px-1 py-0.5 text-muted-foreground"
+                      key={itemKey}
+                    >
+                      <span className="relative mt-0.5 inline-flex size-4 shrink-0 items-center justify-center">
+                        <Icon className="size-3.5" />
+                        <span className={`absolute -right-0.5 -top-0.5 size-1.5 rounded-full ${subAgentProgressDotClass(progress)} ${active ? 'animate-pulse' : ''}`} />
                       </span>
-                    ))}
-                  </div>
-                )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate text-foreground">{formatSubAgentProgressTitle(progress)}</span>
+                          <span className="shrink-0 text-[10px] text-muted-foreground">{formatProgressTime(progress.at)}</span>
+                        </div>
+                        {meta.length > 0 && (
+                          <div className="mt-0.5 flex min-w-0 flex-wrap gap-1">
+                            {meta.map((item) => (
+                              <span
+                                className="max-w-full truncate rounded-(--agent-radius,12px) bg-muted/60 px-1.5 py-0.5"
+                                key={item}
+                                title={item}
+                              >
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )
@@ -1176,6 +1259,9 @@ function progressSignature(events: AgentProgressEvent[]): string {
     detail: event.detail,
     toolName: event.toolName,
     toolCallId: event.toolCallId,
+    parentToolCallId: event.parentToolCallId,
+    subTaskId: event.subTaskId,
+    subTaskTitle: event.subTaskTitle,
     depth: event.depth,
     at: event.at,
   })))
@@ -2491,7 +2577,7 @@ export default function AgentPage() {
                           const elapsedMs = toolElapsedByKey[toolPartProgressKey(part, toolName)]
                           const label = done && elapsedMs ? `${toolLabel} · ${formatElapsed(elapsedMs)}` : toolLabel
                           const badges = collectToolBadges(part.input)
-                          const delegateTask = toolName === 'delegate_analysis' ? getDelegateTask(part) : undefined
+                          const delegateTasks = toolName === 'delegate_analysis' ? getDelegateTasks(part) : undefined
                           if (part.state === 'output-available') {
                             for (const badge of collectRetrievalBadges(toolName, part.output)) pushBadge(badges, badge)
                             collectToolBadges(part.output, badges)
@@ -2516,7 +2602,7 @@ export default function AgentPage() {
                                 <p className="text-destructive text-xs">{part.errorText}</p>
                               )}
                               {toolName === 'delegate_analysis' && subAgentEventsForMessage.length > 0 && (
-                                <SubAgentProgressPanel events={subAgentEventsForMessage} task={delegateTask} />
+                                <SubAgentProgressPanel events={subAgentEventsForMessage} tasks={delegateTasks} />
                               )}
                             </ChainOfThoughtStep>
                           )
