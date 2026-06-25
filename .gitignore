@@ -1,3 +1,7 @@
+# 私有子项目：wcdb_api 源码（保密，单独私有仓库 JiQingzhe2004/wcdb_api）
+# 主仓库公开，只发布 resources/ 下的编译产物，不暴露源码
+wcdb_api/
+
 # Logs
 logs
 *.log
