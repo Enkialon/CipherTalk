@@ -334,7 +334,15 @@ export class VoiceTranscribeServiceWhisper {
                 }
             } else {
                 console.error('[Whisper] 识别失败:', result.error)
-                return { success: false, error: result.error }
+                // 模型文件损坏（多为旧版下载中断/续传错位残留）：下载函数开头 existsSync 会把已存在的
+                // .bin 当成"已下载"短路，不会自动重下，所以这里给出可操作提示，引导用户清除后重下。
+                const corrupt = /unknown tensor|failed to initialize whisper|invalid model|not a valid/i.test(result.error || '')
+                return {
+                    success: false,
+                    error: corrupt
+                        ? '模型文件已损坏（多为下载中断或续传错位所致）。请在设置里清除该 Whisper 模型后重新下载。'
+                        : result.error
+                }
             }
         } catch (error) {
             console.error('[Whisper] 异常:', error)
@@ -538,9 +546,25 @@ export class VoiceTranscribeServiceWhisper {
                 }
 
                 const isResumeResponse = response.statusCode === 206
-                if (downloadedBytes > 0 && response.statusCode === 200) {
-                    try { unlinkSync(tempPath) } catch { }
-                    downloadedBytes = 0
+
+                // 断点续传健壮性：本地已有残片(.tmp)时，服务器响应必须是"从 downloadedBytes 处继续"。
+                // 只要对不上——忽略 Range 直接回 200、206 的区间起点跟本地字节数不一致、或返回 416 等——
+                // 都不能在旧残片后追加，否则会拼出"大小看着对、内容却错位"的损坏模型，whisper 加载时报
+                // unknown tensor / failed to initialize（正是用户反馈的现象）。这些情况一律删残片从头重下。
+                if (downloadedBytes > 0) {
+                    const rangeStart = isResumeResponse
+                        ? Number(String(response.headers['content-range'] || '').match(/bytes\s+(\d+)-/i)?.[1] ?? -1)
+                        : -1
+                    const canResume = isResumeResponse && rangeStart === downloadedBytes
+                    if (!canResume) {
+                        response.destroy()
+                        try { unlinkSync(tempPath) } catch { }
+                        // 从头重下（无 Range → 服务器回 200 全量），不减 redirect 预算（这是重下不是重定向）
+                        this.downloadFile(url, targetPath, onProgress, cancelState, remainingRedirects, timeout)
+                            .then(resolve)
+                            .catch(reject)
+                        return
+                    }
                 }
 
                 if (response.statusCode !== 200 && response.statusCode !== 206) {
@@ -577,13 +601,30 @@ export class VoiceTranscribeServiceWhisper {
                     reject(cancelState?.cancelled ? new Error(DOWNLOAD_CANCELLED_MESSAGE) : error)
                 })
                 writer.on('finish', () => {
-                    writer.close()
-                    if (cancelState?.cancelled) {
-                        reject(new Error(DOWNLOAD_CANCELLED_MESSAGE))
-                        return
-                    }
-                    renameSync(tempPath, targetPath)
-                    resolve()
+                    // fd 完全关闭后再改名：Windows 上文件句柄未释放时 renameSync 会失败。
+                    writer.close(() => {
+                        if (cancelState?.cancelled) {
+                            reject(new Error(DOWNLOAD_CANCELLED_MESSAGE))
+                            return
+                        }
+                        try {
+                            // 完整性校验：最终大小必须等于服务器声明的总大小，否则判为损坏，删掉让用户重下，
+                            // 绝不把半截/错位文件改名成正式模型（否则 whisper 加载报 unknown tensor）。
+                            const finalSize = existsSync(tempPath) ? statSync(tempPath).size : 0
+                            if (totalBytes && finalSize !== totalBytes) {
+                                try { unlinkSync(tempPath) } catch { }
+                                reject(new Error(`下载不完整（${finalSize}/${totalBytes} 字节），请重新下载`))
+                                return
+                            }
+                            renameSync(tempPath, targetPath)
+                            resolve()
+                        } catch (error) {
+                            // rename/stat 抛错绝不能冒泡出 WriteStream 事件回调——那会成为主进程未捕获异常，
+                            // 直接弹「A JavaScript error occurred in the main process」崩溃框（正是用户反馈的现象）。
+                            try { unlinkSync(tempPath) } catch { }
+                            reject(error instanceof Error ? error : new Error(String(error)))
+                        }
+                    })
                 })
 
                 response.pipe(writer)
