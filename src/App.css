@@ -20,6 +20,12 @@
   overflow: hidden;
 }
 
+/* 主内容区连续曲率圆角（超椭圆），配合 rounded-xl 的半径使用。
+   Chromium 139+ (本项目 Electron 39 = Chromium 141) 原生支持；不支持时静默退回普通圆弧。 */
+.ct-squircle {
+  corner-shape: squircle; /* = superellipse(2)，苹果连续曲率；1=普通圆弧，越大越方 */
+}
+
 .ct-toast-region.toast-region--top {
   top: calc(41px + 8px);
   z-index: 4500;
