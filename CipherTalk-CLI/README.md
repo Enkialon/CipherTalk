@@ -73,16 +73,17 @@ npm run cli:test
 
 ## 交互模式
 
-在真实终端中执行 `miyu status` 会进入独立的全屏终端界面。界面会先显示 CipherTalk 欢迎页，按 Enter 后进入 CipherTalk CLI 工作台。进入后所有命令都使用 `/命令` 形式：
+在真实终端中执行 `miyu status` 会进入独立的全屏终端界面，直接列出带编号的命令菜单，无需按 Enter 继续。选择命令有两种方式：输入编号回车，或输入 `/命令`。
 
 ```bash
 miyu status
+miyu> 2              # 输入编号选择（无参命令直接执行，需参数的命令会填入命令名等你补全）
 miyu> /sessions --limit 20
 miyu> /messages "张三" --limit 50
 miyu> /exit
 ```
 
-输入 `/` 会打开命令候选区，可以用上下方向键选择，按 Enter 或 Tab 补全命令；继续输入会过滤候选项。输入 `/help` 可以查看完整命令列表。如果某些终端环境没有自动进入界面，可以使用 `--ui` 强制进入：
+输入编号回车即可选中对应命令：无参命令（如 `/status`、`/sessions`）直接执行，需要参数的命令（如 `/messages`、`/export`）会把命令名填进输入行，等你补全参数后回车。也可以输入 `/` 打开命令候选区，用上下方向键选择、按 Enter 或 Tab 补全。输入 `/help` 查看完整命令列表。如果某些终端环境没有自动进入界面，可以使用 `--ui` 强制进入：
 
 ```bash
 miyu --ui status

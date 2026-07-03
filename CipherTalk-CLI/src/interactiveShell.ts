@@ -168,6 +168,21 @@ function showCommandList(): string {
   ].join('\n')
 }
 
+/** 带编号的命令菜单：进入界面即展示，输入编号回车即可选择。 */
+function showNumberedMenu(): string {
+  const width = Math.max(...COMMANDS.map((command) => command.usage.length))
+  return [
+    '选择命令（输入编号回车，或输入 / 浏览命令）：',
+    ...COMMANDS.map((command, index) => `  ${String(index + 1).padStart(2)}. ${command.usage.padEnd(width)}  ${command.description}`)
+  ].join('\n')
+}
+
+/** 该命令是否还需要补充参数（用法里除可选 [..] 外还剩必填内容，如 <会话> / serve）。 */
+export function needsCompletion(command: InteractiveCommand): boolean {
+  const rest = command.usage.slice(command.name.length).replace(/\[[^\]]*\]/g, '').trim()
+  return rest.length > 0
+}
+
 function shellFormat(config: RuntimeConfig, globals: GlobalCliOptions, options: Record<string, string | boolean>): OutputFormat {
   const explicit = asString(options.format) || globals.format
   if (explicit === 'json' || explicit === 'jsonl' || explicit === 'csv' || explicit === 'markdown' || explicit === 'table') {
@@ -613,10 +628,15 @@ export async function startInteractiveShell(
   const renderHeader = () => {
     output.write([
       'CipherTalk CLI 工作台',
-      '输入 / 显示命令，输入 /help 查看帮助，输入 /exit 退出。',
+      '输入编号选择命令，或输入 / 浏览命令，/exit 退出。',
       '────────────────────────────────────────────────────────',
       ''
     ].join('\n'))
+  }
+
+  // 在提示符上方打印带编号的命令菜单，方便随时输入编号选择。
+  const printMenu = () => {
+    output.write(`${showNumberedMenu()}\n`)
   }
 
   const currentSuggestions = () => filterInteractiveCommands(buffer)
@@ -673,11 +693,25 @@ export async function startInteractiveShell(
         await runShellCommand(options.initialCommand, context, globals)
         output.write('\n')
       }
+      printMenu()
       render()
     }
 
     const execute = async () => {
-      const line = buffer.trim()
+      let line = buffer.trim()
+      // 数字选择：把纯数字映射成对应命令。需要参数的命令只把命令名填进输入行等补全，不直接执行。
+      if (/^\d+$/.test(line)) {
+        const picked = COMMANDS[Number(line) - 1]
+        if (picked) {
+          if (needsCompletion(picked)) {
+            buffer = `${picked.name} `
+            selectedSuggestion = 0
+            render()
+            return
+          }
+          line = picked.name
+        }
+      }
       buffer = ''
       output.write('\n')
       input.off('keypress', onKeypress)
@@ -696,8 +730,9 @@ export async function startInteractiveShell(
         return
       }
       input.on('keypress', onKeypress)
-      // 命令输出末尾换一行，提示符画在输出下方而不是把屏幕清掉
+      // 命令输出末尾换一行，重新显示编号菜单，提示符画在其下方
       output.write('\n')
+      printMenu()
       render()
     }
 
