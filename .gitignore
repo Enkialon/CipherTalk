@@ -87,3 +87,6 @@ tools/
 # 插件打包产物
 *.ctp
 *.ctplugin
+
+# 本地插件开发工作区（制作/调试插件用，不纳入版本库）
+plugin-workspace/
