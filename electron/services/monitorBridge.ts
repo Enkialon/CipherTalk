@@ -5,6 +5,10 @@ import type { FSWatcher } from 'fs'
 import { ConfigService } from './config'
 
 const DEBOUNCE_MS = 120
+// fs.watch 兜底：macOS 的 FSEvents 递归监听在监听其他 App 沙盒容器目录时容易被合并/节流丢事件，
+// 用 stat() 轮询 WAL/shm 的 mtime+size 作为独立信号，检测到变化就走同一 scheduleEmit（会与 fs.watch 去重）。
+const POLL_INTERVAL_MS = 1500
+const POLL_SUBDIRS = ['session', 'message', 'contact']
 
 export type ChangeTable = 'Session' | 'Message' | 'Contact' | 'Sns' | 'Unknown'
 
@@ -68,6 +72,8 @@ export class MonitorBridge extends EventEmitter {
   private watcher: FSWatcher | null = null
   private dbStoragePath: string | null = null
   private timers: Map<string, NodeJS.Timeout> = new Map()
+  private pollTimer: NodeJS.Timeout | null = null
+  private fileSigs: Map<string, string> = new Map()
   private nativeMode = false
   private nativeRef: any = null
   private nativeHandler: ((type: any, json: any) => void) | null = null
@@ -106,6 +112,8 @@ export class MonitorBridge extends EventEmitter {
         this.emit('monitorError', err instanceof Error ? err : new Error(String(err)))
       })
 
+      this.startPolling(resolved)
+
       console.log('[MonitorBridge] 启动监听:', resolved)
       return true
     } catch (e: any) {
@@ -132,11 +140,53 @@ export class MonitorBridge extends EventEmitter {
     this.timers.set(key, timer)
   }
 
+  private startPolling(root: string): void {
+    if (this.pollTimer) return
+    // 首轮只建立基线（不 emit），之后每轮对比 mtime+size，变化才触发。
+    this.pollOnce(root)
+    this.pollTimer = setInterval(() => this.pollOnce(root), POLL_INTERVAL_MS)
+    this.pollTimer.unref?.()
+  }
+
+  private pollOnce(root: string): void {
+    for (const sub of POLL_SUBDIRS) {
+      const dir = join(root, sub)
+      let entries: string[]
+      try {
+        entries = readdirSync(dir)
+      } catch {
+        continue
+      }
+      for (const entry of entries) {
+        if (!/\.db-(wal|shm)$/i.test(entry)) continue
+        const full = join(dir, entry)
+        let sig: string
+        try {
+          const st = statSync(full)
+          sig = `${st.mtimeMs}:${st.size}`
+        } catch {
+          continue
+        }
+        const key = full.toLowerCase()
+        const prev = this.fileSigs.get(key)
+        this.fileSigs.set(key, sig)
+        if (prev !== undefined && prev !== sig) {
+          this.scheduleEmit(entry, full)
+        }
+      }
+    }
+  }
+
   stop(): void {
     if (this.watcher) {
       try { this.watcher.close() } catch { /* ignore */ }
       this.watcher = null
     }
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer)
+      this.pollTimer = null
+    }
+    this.fileSigs.clear()
     for (const t of this.timers.values()) clearTimeout(t)
     this.timers.clear()
     this.dbStoragePath = null
