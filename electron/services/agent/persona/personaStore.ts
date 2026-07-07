@@ -98,8 +98,7 @@ export class PersonaStore {
   private getCacheBasePath(): string {
     const config = new ConfigService()
     try {
-      const cachePath = String(config.get('cachePath') || '').trim()
-      return cachePath || join(process.cwd(), 'cache')
+      return config.getCacheBasePath()
     } finally {
       config.close()
     }

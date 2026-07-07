@@ -374,8 +374,7 @@ export class ChatSearchIndexService {
   private getCacheBasePath(): string {
     const configService = new ConfigService()
     try {
-      const cachePath = String(configService.get('cachePath') || '').trim()
-      return cachePath || join(process.cwd(), 'cache')
+      return configService.getCacheBasePath()
     } finally {
       configService.close()
     }

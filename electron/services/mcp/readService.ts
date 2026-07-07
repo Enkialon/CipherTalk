@@ -1114,10 +1114,12 @@ async function getVoiceLocalPath(sessionId: string, message: Message): Promise<s
     if (!voiceResult.success || !voiceResult.data) return null
 
     const configService = new ConfigService()
-    const cachePath = String(configService.get('cachePath') || '')
-    configService.close()
-
-    const baseDir = cachePath || join(process.cwd(), 'cache')
+    let baseDir: string
+    try {
+      baseDir = configService.getCacheBasePath()
+    } finally {
+      configService.close()
+    }
     const voiceDir = join(baseDir, 'McpVoices', sessionId.replace(/[\\/:*?"<>|]/g, '_'))
     if (!existsSync(voiceDir)) {
       mkdirSync(voiceDir, { recursive: true })

@@ -345,7 +345,7 @@ export class CacheService {
     const basePaths = [
       configuredCachePath,
       this.getEffectiveCachePath(),
-      join(process.cwd(), 'cache')
+      this.configService.getCacheBasePath()
     ].filter(Boolean)
 
     const dbNames = [
@@ -392,7 +392,7 @@ export class CacheService {
     const basePaths = [
       configuredCachePath,
       this.getEffectiveCachePath(),
-      join(process.cwd(), 'cache')
+      this.configService.getCacheBasePath()
     ].filter(Boolean)
 
     return Array.from(new Set(

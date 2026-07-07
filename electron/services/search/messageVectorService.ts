@@ -342,8 +342,7 @@ class MessageVectorService {
   private getCacheBasePath(): string {
     const cs = new ConfigService()
     try {
-      const cachePath = String(cs.get('cachePath') || '').trim()
-      return cachePath || join(process.cwd(), 'cache')
+      return cs.getCacheBasePath()
     } finally {
       cs.close()
     }
