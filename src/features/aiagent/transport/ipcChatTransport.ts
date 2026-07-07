@@ -91,6 +91,9 @@ type AgentStreamSmokeRun = {
   hasUsage: boolean
   usage?: unknown
   metadataKeys: string[]
+  textPreview: string
+  sampleChunks: unknown[]
+  lastChunks: unknown[]
   errorText?: string
 }
 
@@ -98,35 +101,40 @@ function nowMs(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now()
 }
 
-function isSmokeEnabled(): boolean {
-  const dev = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV)
-  if (dev) return true
-  try {
-    return globalThis.localStorage?.getItem('ctAgentStreamSmoke') === '1'
-  } catch {
-    return false
-  }
+type AgentStreamSmokeStore = {
+  last: AgentStreamSmokeRun | null
+  runs: AgentStreamSmokeRun[]
+  clear: () => void
 }
 
-function publishSmoke(run: AgentStreamSmokeRun): void {
-  if (!isSmokeEnabled() || typeof window === 'undefined') return
+function ensureSmokeStore(): AgentStreamSmokeStore | null {
+  if (typeof window === 'undefined') return null
   const win = window as unknown as {
-    __ctAgentStreamSmoke?: {
-      last: AgentStreamSmokeRun
-      runs: AgentStreamSmokeRun[]
-      clear: () => void
+    __ctAgentStreamSmoke?: AgentStreamSmokeStore
+  }
+  if (!win.__ctAgentStreamSmoke) {
+    win.__ctAgentStreamSmoke = {
+      last: null,
+      runs: [],
+      clear: () => {
+        if (!win.__ctAgentStreamSmoke) return
+        win.__ctAgentStreamSmoke.last = null
+        win.__ctAgentStreamSmoke.runs = []
+      },
     }
-    dispatchEvent?: (event: Event) => boolean
   }
-  const currentRuns = win.__ctAgentStreamSmoke?.runs || []
-  const runs = [...currentRuns.filter((item) => item.runId !== run.runId), run].slice(-20)
-  win.__ctAgentStreamSmoke = {
-    last: run,
-    runs,
-    clear: () => { delete win.__ctAgentStreamSmoke },
-  }
+  return win.__ctAgentStreamSmoke
+}
+
+ensureSmokeStore()
+
+function publishSmoke(run: AgentStreamSmokeRun): void {
+  const store = ensureSmokeStore()
+  if (!store || typeof window === 'undefined') return
+  store.runs = [...store.runs.filter((item) => item.runId !== run.runId), run].slice(-20)
+  store.last = run
   try {
-    win.dispatchEvent?.(new CustomEvent('ct-agent-stream-smoke', { detail: run }))
+    window.dispatchEvent(new CustomEvent('ct-agent-stream-smoke', { detail: run }))
   } catch {
     /* CustomEvent may be unavailable in tests. */
   }
@@ -138,7 +146,6 @@ function startSmokeRun(input: {
   planMode: boolean
   toolProfile: AgentToolProfile
 }): AgentStreamSmokeRun | null {
-  if (!isSmokeEnabled()) return null
   const startedAt = nowMs()
   const run: AgentStreamSmokeRun = {
     ...input,
@@ -150,6 +157,9 @@ function startSmokeRun(input: {
     progressStages: {},
     hasUsage: false,
     metadataKeys: [],
+    textPreview: '',
+    sampleChunks: [],
+    lastChunks: [],
   }
   publishSmoke(run)
   return run
@@ -174,8 +184,13 @@ function observeSmokeChunk(run: AgentStreamSmokeRun | null, chunk: unknown): voi
     const object = readObject(chunk)
     const type = String(object?.type || 'unknown')
     item.chunkTypes[type] = (item.chunkTypes[type] || 0) + 1
+    if (item.sampleChunks.length < 12) item.sampleChunks.push(chunk)
+    item.lastChunks = [...item.lastChunks, chunk].slice(-12)
     if (item.firstOutputMs === undefined && ['text-delta', 'reasoning-delta', 'tool-input-start'].includes(type)) {
       item.firstOutputMs = elapsed
+    }
+    if (type === 'text-delta' && typeof object?.delta === 'string') {
+      item.textPreview = `${item.textPreview}${object.delta}`.slice(-1000)
     }
     if (type === 'finish') {
       item.finishChunkMs = elapsed

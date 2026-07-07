@@ -405,6 +405,11 @@ function AgentMessageItemImpl({
 }
 
 function propsAreEqual(prev: AgentMessageItemProps, next: AgentMessageItemProps): boolean {
+  // AI SDK 7 会高频替换最后一条 assistant 消息；这里宁可让在途/刚结束的最后一条多渲染一次，
+  // 也不能因为 memo 比较过紧把 text part 的可见更新挡住。
+  if (prev.isLastMessage || next.isLastMessage || prev.busy || next.busy || prev.status === 'streaming' || next.status === 'streaming') {
+    return false
+  }
   if (prev.message !== next.message) return false
   if (prev.messageIndex !== next.messageIndex) return false
   if (prev.isLastMessage !== next.isLastMessage) return false

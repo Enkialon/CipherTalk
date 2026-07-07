@@ -74,14 +74,53 @@ function stableUiMessageKey(message: UIMessage, fallbackIndex: number): string {
   }
 }
 
+function uiMessageTextLength(message: UIMessage): number {
+  const parts = Array.isArray((message as any)?.parts) ? (message as any).parts as any[] : []
+  return parts.reduce((sum, part) => (
+    sum + (part?.type === 'text' && typeof part.text === 'string' ? part.text.length : 0)
+  ), 0)
+}
+
+function uiMessageCompletenessScore(message: UIMessage): number {
+  const anyMessage = message as any
+  const parts = Array.isArray(anyMessage?.parts) ? anyMessage.parts as any[] : []
+  const metadata = anyMessage?.metadata && typeof anyMessage.metadata === 'object' ? anyMessage.metadata as any : null
+  let score = 0
+  score += parts.length * 10
+  score += uiMessageTextLength(message)
+  if (metadata?.usage) score += 100_000
+  if (metadata?.finishReason || metadata?.rawFinishReason) score += 50_000
+  if (metadata?.ciphertalk?.trace?.finishedAt) score += 25_000
+  for (const part of parts) {
+    if (!part || typeof part !== 'object') continue
+    if (part.type === 'text' && part.state === 'done') score += 1_000
+    if (typeof part.type === 'string' && part.type.startsWith('tool-')) {
+      if (part.state === 'output-available' || part.state === 'output-error' || part.state === 'output-denied') score += 2_000
+      else if (part.state) score += 500
+    }
+  }
+  return score
+}
+
+function pickMoreCompleteUiMessage(current: UIMessage, incoming: UIMessage): UIMessage {
+  const currentScore = uiMessageCompletenessScore(current)
+  const incomingScore = uiMessageCompletenessScore(incoming)
+  if (incomingScore !== currentScore) return incomingScore > currentScore ? incoming : current
+  return uiMessageTextLength(incoming) >= uiMessageTextLength(current) ? incoming : current
+}
+
 function mergeUiMessagesById(dbMessages: UIMessage[] = [], incomingMessages: UIMessage[] = []): UIMessage[] {
-  const seen = new Set<string>()
+  const indexByKey = new Map<string, number>()
   const merged: UIMessage[] = []
   const push = (message: UIMessage, index: number) => {
     if (!message || typeof message !== 'object') return
     const key = stableUiMessageKey(message, index)
-    if (seen.has(key)) return
-    seen.add(key)
+    const existingIndex = indexByKey.get(key)
+    if (existingIndex !== undefined) {
+      merged[existingIndex] = pickMoreCompleteUiMessage(merged[existingIndex], message)
+      return
+    }
+    indexByKey.set(key, merged.length)
     merged.push(message)
   }
   dbMessages.forEach(push)

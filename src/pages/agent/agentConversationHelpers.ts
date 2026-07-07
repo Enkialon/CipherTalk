@@ -151,6 +151,7 @@ export type AgentTraceStep = {
   provider?: string
   modelId?: string
   finishReason?: string
+  usage?: AgentUsage
   elapsedMs?: number
   responseMs?: number
   timeToFirstOutputMs?: number
@@ -177,6 +178,18 @@ export type AgentTraceMetadata = {
   tools: AgentTraceTool[]
 }
 
+export type AgentProviderCacheStatus = {
+  providerKind?: string
+  providerName?: string
+  model?: string
+  promptCacheKey?: string
+  promptCacheRetention?: '24h' | string
+  promptCacheEnabled?: boolean
+  promptCacheProvider?: 'openai-responses' | 'anthropic' | 'google' | 'openai-compatible' | 'none' | string
+  requestBodyPromptCacheField?: 'prompt_cache_key' | 'promptCacheKey' | string
+  reason?: string
+}
+
 export type AgentMessageMetadata = {
   usage?: AgentUsage
   finishReason?: string
@@ -188,6 +201,7 @@ export type AgentMessageMetadata = {
   ciphertalk?: {
     subAgentProgress?: AgentProgressEvent[]
     toolElapsed?: Record<string, number>
+    providerCache?: AgentProviderCacheStatus
     trace?: AgentTraceMetadata
   }
 }

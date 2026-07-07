@@ -10,7 +10,7 @@ import { createLanguageModel } from './provider'
 import { buildAgentPromptParts, CODE_WORKSPACE_PROMPT, IMAGE_GEN_PROMPT, PLAN_MODE_PROMPT, WEB_SEARCH_PROMPT } from './prompts'
 import { isWebSearchAvailable } from '../ai/webSearchService'
 import { isImageGenAvailable } from '../ai/imageGenService'
-import { applyAnthropicCacheControl, buildPromptCacheKey, buildProviderOptions, buildReasoningOption } from './cache'
+import { applyAnthropicCacheControl, buildPromptCacheKey, buildProviderCacheStatus, buildProviderOptions, buildReasoningOption } from './cache'
 import { buildCodeOnlyTools, buildPlanModeTools, buildTools } from './tools'
 import { afterTurnMemory, buildMemoryContext, preloadRelevantMemories } from './tools/memory'
 import { aiCompactStep, createCompactionState } from './aiCompaction'
@@ -111,15 +111,83 @@ function trackToolChunk(
   pendingToolCalls?.delete(chunk.toolCallId)
 }
 
-function withCacheHitRate(usage: unknown): unknown {
-  if (!usage || typeof usage !== 'object') return usage
-  const inputTokens = Number((usage as { inputTokens?: unknown }).inputTokens)
-  const details = (usage as { inputTokenDetails?: { cacheReadTokens?: unknown } }).inputTokenDetails
-  const cacheReadTokens = Number(details?.cacheReadTokens)
-  const cacheHitRate = Number.isFinite(inputTokens) && inputTokens > 0 && Number.isFinite(cacheReadTokens)
+function finiteTokenCount(value: unknown): number | undefined {
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 0 ? n : undefined
+}
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : null
+}
+
+function nestedNumber(value: unknown, path: string[]): number | undefined {
+  let current: unknown = value
+  for (const key of path) {
+    const object = recordOf(current)
+    if (!object) return undefined
+    current = object[key]
+  }
+  return finiteTokenCount(current)
+}
+
+function firstTokenCount(...values: Array<number | undefined>): number | undefined {
+  return values.find((value) => value !== undefined)
+}
+
+function normalizeUsageForCacheStats(usage: unknown): unknown {
+  const source = recordOf(usage)
+  if (!source) return usage
+  const raw = source.raw
+  const details = recordOf(source.inputTokenDetails) || {}
+
+  const inputTokens = firstTokenCount(
+    finiteTokenCount(source.inputTokens),
+    nestedNumber(raw, ['prompt_tokens']),
+    nestedNumber(raw, ['input_tokens']),
+  )
+  const rawCacheReadTokens = firstTokenCount(
+    nestedNumber(raw, ['prompt_cache_hit_tokens']),
+    nestedNumber(raw, ['prompt_cache_read_tokens']),
+    nestedNumber(raw, ['cache_read_input_tokens']),
+    nestedNumber(raw, ['cache_read_tokens']),
+    nestedNumber(raw, ['prompt_tokens_details', 'cached_tokens']),
+    nestedNumber(raw, ['input_tokens_details', 'cached_tokens']),
+    nestedNumber(raw, ['cachedContentTokenCount']),
+    nestedNumber(raw, ['total_cached_tokens']),
+  )
+  const cacheReadTokens = firstTokenCount(
+    rawCacheReadTokens && rawCacheReadTokens > 0 ? rawCacheReadTokens : undefined,
+    finiteTokenCount(details.cacheReadTokens),
+    rawCacheReadTokens,
+  )
+  const cacheWriteTokens = firstTokenCount(
+    finiteTokenCount(details.cacheWriteTokens),
+    nestedNumber(raw, ['cache_creation_input_tokens']),
+    nestedNumber(raw, ['cache_write_input_tokens']),
+    nestedNumber(raw, ['cache_write_tokens']),
+  )
+  const noCacheTokens = firstTokenCount(
+    finiteTokenCount(details.noCacheTokens),
+    nestedNumber(raw, ['prompt_cache_miss_tokens']),
+    inputTokens !== undefined && cacheReadTokens !== undefined
+      ? Math.max(0, inputTokens - cacheReadTokens - (cacheWriteTokens || 0))
+      : undefined,
+  )
+  const cacheHitRate = inputTokens !== undefined && inputTokens > 0 && cacheReadTokens !== undefined
     ? cacheReadTokens / inputTokens
     : undefined
-  return cacheHitRate === undefined ? usage : { ...(usage as Record<string, unknown>), cacheHitRate }
+
+  return {
+    ...source,
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    inputTokenDetails: {
+      ...details,
+      ...(noCacheTokens !== undefined ? { noCacheTokens } : {}),
+      ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+      ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+    },
+    ...(cacheHitRate !== undefined ? { cacheHitRate } : {}),
+  }
 }
 
 function readToolOutputError(output: unknown): string | undefined {
@@ -224,11 +292,12 @@ export async function runAgent(
           }))
     perf('构建工具集', `${Object.keys(baseTools).length} 个`)
     const prepared = buildAgentInstructions(input, memoryContext, relevantMemoryContext, baseTools, webSearchOn, imageGenOn)
+    const providerCache = buildProviderCacheStatus(input, prepared.promptCacheKey)
     perf('组装系统提示')
     // 跨步保持的压缩状态：超过模型窗口 90% 时把早期历史交 LLM 摘要折叠，见 aiCompaction.ts
     const compactionState = createCompactionState()
     const agent = new ToolLoopAgent({
-      model: createLanguageModel(input.providerConfig),
+      model: createLanguageModel(input.providerConfig, { promptCacheKey: prepared.promptCacheKey }),
       instructions: prepared.instructions,
       tools: prepared.tools,
       temperature: DEFAULT_AGENT_TEMPERATURE,
@@ -246,6 +315,7 @@ export async function runAgent(
           provider: step.model.provider,
           modelId: step.model.modelId,
           finishReason: step.finishReason,
+          usage: normalizeUsageForCacheStats(step.usage),
           elapsedMs: step.performance?.stepTimeMs,
           responseMs: step.performance?.responseTimeMs,
           timeToFirstOutputMs: step.performance?.timeToFirstOutputMs,
@@ -289,6 +359,7 @@ export async function runAgent(
     perf('发起模型流式请求')
     // 截留 message 的 finish，等主回答流真正结束、工具状态补齐后再发；自动记忆抽取改成后台异步，不再等它
     let finishChunk: UIMessageChunk | undefined
+    let assistantText = ''
     let perfFirstEventSeen = false
     let perfFirstOutputSeen = false
     const toolNames = new Map<string, string>()
@@ -301,12 +372,13 @@ export async function runAgent(
       messageMetadata: ({ part }) => {
         if (part.type !== 'finish') return undefined
         return {
-          usage: withCacheHitRate(part.totalUsage),
+          usage: normalizeUsageForCacheStats(part.totalUsage),
           finishReason: part.finishReason,
           rawFinishReason: part.rawFinishReason,
           modelProvider: input.providerConfig.name,
           modelId: input.providerConfig.model,
           ciphertalk: {
+            providerCache,
             trace: snapshotTrace(trace),
           },
           ...(input.planMode ? { planMode: true } : {}),
@@ -324,11 +396,10 @@ export async function runAgent(
         perf('模型首个增量输出（真正开始回复）', chunk.type)
       }
       if (chunk.type === 'finish') { finishChunk = chunk; continue }
+      if (chunk.type === 'text-delta') assistantText += chunk.delta
       trackToolChunk(chunk, toolNames, pendingToolCalls)
       onChunk(chunk)
     }
-    let assistantText = ''
-    try { assistantText = await result.text } catch { /* abort/异常：跳过自动记忆 */ }
     perf('主回答流结束')
     if (pendingToolCalls.size > 0 && !signal?.aborted) {
       for (const [toolCallId, pending] of pendingToolCalls.entries()) {
@@ -345,7 +416,26 @@ export async function runAgent(
     trace.totalElapsedMs = traceEnd - perfStart
     trace.stepCount = trace.steps.length
     trace.toolCount = trace.tools.length
-    if (finishChunk) onChunk(finishChunk)
+    if (finishChunk) {
+      const finishMetadata = 'messageMetadata' in finishChunk && finishChunk.messageMetadata && typeof finishChunk.messageMetadata === 'object'
+        ? finishChunk.messageMetadata as Record<string, any>
+        : {}
+      const ciphertalkMetadata = finishMetadata.ciphertalk && typeof finishMetadata.ciphertalk === 'object'
+        ? finishMetadata.ciphertalk as Record<string, any>
+        : {}
+      onChunk({
+        ...finishChunk,
+        messageMetadata: {
+          ...finishMetadata,
+          ciphertalk: {
+            ...ciphertalkMetadata,
+            providerCache,
+            trace: snapshotTrace(trace),
+          },
+          ...(input.planMode ? { planMode: true } : {}),
+        },
+      } as UIMessageChunk)
+    }
     reportAgentProgress({ stage: 'run_finished', title: '回答生成完成' })
     // 自动记忆抽取是额外一次 LLM 调用；主回答已经出完，不再让"回复中"干等这一步。
     // 后台异步跑，写库效果不受影响，只是它合成的 auto_memory 工具 part 不会再挂在这条已经结束的消息上。
@@ -593,7 +683,7 @@ Deep reply-suggestion mode is connected to the full Agent toolset. You may searc
     },
   ]
   const agent = new ToolLoopAgent({
-    model: createLanguageModel(input.providerConfig),
+    model: createLanguageModel(input.providerConfig, { promptCacheKey: prepared.promptCacheKey }),
     instructions,
     tools: prepared.tools,
     temperature: input.style === 'likeme' ? 0.8 : DEFAULT_AGENT_TEMPERATURE,

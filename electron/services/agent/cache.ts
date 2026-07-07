@@ -49,8 +49,11 @@ function hostFromUrl(url: string): string | null {
 
 function isOfficialOpenAIResponsesEndpoint(input: AgentRunInput): boolean {
   return input.providerConfig.providerKind === 'openai-responses' &&
-    input.providerConfig.name !== 'custom' &&
     hostFromUrl(input.providerConfig.baseURL) === 'api.openai.com'
+}
+
+function supportsOpenAI24hPromptCache(model: string): boolean {
+  return /\b5\.1\b/.test(model.toLowerCase())
 }
 
 function shortHash(value: string): string {
@@ -121,7 +124,16 @@ export function buildProviderOptions(input: AgentRunInput, promptCacheKey: strin
       // 让 OpenAI 返回思考摘要（推理模型才有内容，非推理模型会被忽略）；下游 engine 已透传 reasoning 块
       option.reasoningSummary = 'auto'
       option.store = isOfficialOpenAIResponsesEndpoint(input)
-      if (option.store) option.promptCacheKey = promptCacheKey
+      if (option.store) {
+        option.promptCacheKey = promptCacheKey
+        if (supportsOpenAI24hPromptCache(input.providerConfig.model)) {
+          option.promptCacheRetention = '24h'
+        }
+      }
+    } else {
+      // @ai-sdk/openai-compatible 只校验 camelCase 标准项；厂商扩展字段要用请求体原名透传。
+      // 这里恢复 AI SDK 6 时代 OpenAI-compatible 服务常用的 prompt_cache_key 行为。
+      option.prompt_cache_key = promptCacheKey
     }
     if (Object.keys(option).length > 0) {
       const keys = new Set(['openai'])
@@ -147,6 +159,66 @@ export function buildProviderOptions(input: AgentRunInput, promptCacheKey: strin
   }
 
   return Object.keys(options).length > 0 ? options as ProviderOptions : undefined
+}
+
+export type AgentProviderCacheStatus = {
+  providerKind: AgentRunInput['providerConfig']['providerKind']
+  providerName: string
+  model: string
+  promptCacheKey: string
+  promptCacheRetention?: '24h'
+  promptCacheEnabled: boolean
+  promptCacheProvider: 'openai-responses' | 'anthropic' | 'google' | 'openai-compatible' | 'none'
+  requestBodyPromptCacheField?: 'prompt_cache_key' | 'promptCacheKey'
+  reason?: string
+}
+
+export function buildProviderCacheStatus(input: AgentRunInput, promptCacheKey: string): AgentProviderCacheStatus {
+  const base = {
+    providerKind: input.providerConfig.providerKind,
+    providerName: input.providerConfig.name,
+    model: input.providerConfig.model,
+    promptCacheKey,
+  }
+  if (isOfficialOpenAIResponsesEndpoint(input)) {
+    return {
+      ...base,
+      ...(supportsOpenAI24hPromptCache(input.providerConfig.model) ? { promptCacheRetention: '24h' as const } : {}),
+      promptCacheEnabled: true,
+      promptCacheProvider: 'openai-responses',
+      requestBodyPromptCacheField: 'promptCacheKey',
+    }
+  }
+  if (input.providerConfig.providerKind === 'anthropic') {
+    return {
+      ...base,
+      promptCacheEnabled: true,
+      promptCacheProvider: 'anthropic',
+    }
+  }
+  if (input.providerConfig.providerKind === 'google') {
+    return {
+      ...base,
+      promptCacheEnabled: false,
+      promptCacheProvider: 'google',
+      reason: 'Google 需要预先创建 cachedContent，当前仅读取返回的 cachedContentTokenCount，尚未创建 cachedContent。',
+    }
+  }
+  if (input.providerConfig.providerKind === 'openai-compatible') {
+    return {
+      ...base,
+      promptCacheEnabled: true,
+      promptCacheProvider: 'openai-compatible',
+      requestBodyPromptCacheField: 'prompt_cache_key',
+      reason: '已通过 AI SDK openai-compatible 的 transformRequestBody 注入 prompt_cache_key；是否命中取决于服务商是否支持并返回 cached_tokens。',
+    }
+  }
+  return {
+    ...base,
+    promptCacheEnabled: false,
+    promptCacheProvider: 'none',
+    reason: '当前 provider 不支持可控 prompt cache 参数。',
+  }
 }
 
 function withAnthropicCacheControl(providerOptions?: ProviderOptions): ProviderOptions {

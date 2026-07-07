@@ -97,6 +97,7 @@ export interface AgentTraceStep {
   provider?: string
   modelId?: string
   finishReason?: string
+  usage?: unknown
   elapsedMs?: number
   responseMs?: number
   timeToFirstOutputMs?: number

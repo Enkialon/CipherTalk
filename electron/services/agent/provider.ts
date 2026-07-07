@@ -12,6 +12,10 @@ import { createProxyFetch } from '../ai/proxyFetch'
 import { withOpenAIResponsesSanitizer } from '../ai/openaiResponsesSanitizer'
 import type { AgentProviderConfig } from './types'
 
+export type AgentLanguageModelOptions = {
+  promptCacheKey?: string
+}
+
 /**
  * 部分第三方 Claude 代理（如 right.codes/claude-aws）会强制返回 thinking 块却漏掉 signature 字段，
  * 触发 @ai-sdk/anthropic 的 schema 校验失败（Invalid JSON response）。这里在非流式 JSON 响应里
@@ -53,7 +57,12 @@ function withAnthropicSanitizer(baseFetch: typeof globalThis.fetch | undefined):
   }) as typeof globalThis.fetch
 }
 
-export function createLanguageModel(config: AgentProviderConfig): LanguageModel {
+function injectOpenAICompatiblePromptCacheKey(args: Record<string, any>, promptCacheKey?: string): Record<string, any> {
+  if (!promptCacheKey || args.prompt_cache_key) return args
+  return { ...args, prompt_cache_key: promptCacheKey }
+}
+
+export function createLanguageModel(config: AgentProviderConfig, options: AgentLanguageModelOptions = {}): LanguageModel {
   const { providerKind, name, apiKey, baseURL, model, headers, proxyUrl } = config
   const fetch = createProxyFetch(proxyUrl)
 
@@ -67,7 +76,15 @@ export function createLanguageModel(config: AgentProviderConfig): LanguageModel 
     return createOpenAI({ apiKey, baseURL, name, headers, fetch: withOpenAIResponsesSanitizer(fetch) }).responses(model as any)
   }
 
-  return createOpenAICompatible({ name, apiKey, baseURL, headers, includeUsage: true, fetch }).chatModel(model)
+  return createOpenAICompatible({
+    name,
+    apiKey,
+    baseURL,
+    headers,
+    includeUsage: true,
+    fetch,
+    transformRequestBody: (args) => injectOpenAICompatiblePromptCacheKey(args, options.promptCacheKey),
+  }).chatModel(model)
 }
 
 export function createProviderFilesApi(config: AgentProviderConfig): FilesV4 | null {

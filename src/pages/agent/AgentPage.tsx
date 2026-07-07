@@ -503,6 +503,40 @@ export default function AgentPage() {
   const lastStreamingSaveAtRef = useRef(0)
   const [modelOpen, setModelOpen] = useState(false)
   const busy = status === 'submitted' || status === 'streaming'
+  useEffect(() => {
+    const lastMessage = messages[messages.length - 1]
+    const metadata = lastMessage?.metadata && typeof lastMessage.metadata === 'object'
+      ? lastMessage.metadata as Record<string, unknown>
+      : null
+    const win = window as unknown as {
+      __ctAgentUiSmoke?: unknown
+    }
+    win.__ctAgentUiSmoke = {
+      status,
+      busy,
+      messageCount: messages.length,
+      lastMessage: lastMessage ? {
+        id: lastMessage.id,
+        role: lastMessage.role,
+        metadataKeys: metadata ? Object.keys(metadata) : [],
+        planMode: metadata?.planMode === true,
+        partCount: lastMessage.parts.length,
+        textTotalLength: lastMessage.parts.reduce((sum, part) => (
+          sum + ('text' in part && typeof part.text === 'string' ? part.text.length : 0)
+        ), 0),
+        textPreview: lastMessage.parts
+          .map((part) => ('text' in part && typeof part.text === 'string' ? part.text : ''))
+          .join('')
+          .slice(-500),
+        parts: lastMessage.parts.map((part) => ({
+          type: part.type,
+          textLength: 'text' in part && typeof part.text === 'string' ? part.text.length : undefined,
+          textPreview: 'text' in part && typeof part.text === 'string' ? part.text.slice(-300) : undefined,
+          state: 'state' in part ? part.state : undefined,
+        })),
+      } : null,
+    }
+  }, [busy, messages, status])
   const clientIdRef = useRef(`agent-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const conversationUpdatedAtRef = useRef(0)
   const pendingConversationReloadRef = useRef<number | null>(null)
@@ -1881,7 +1915,7 @@ export default function AgentPage() {
           <PromptInputControllerBridge controllerRef={promptInputControllerRef} />
           <PromptInput
             accept="image/*,.txt,.md,.json,.csv,.pdf,application/pdf"
-            className={`agent-prompt-input w-full **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface/55 **:data-[slot=input-group]:shadow-lg ${workspaceFileDragOver ? '**:data-[slot=input-group]:ring-2 **:data-[slot=input-group]:ring-primary/45' : ''}`}
+            className={`agent-prompt-input w-full **:data-[slot=input-group]:overflow-visible **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface/55 **:data-[slot=input-group]:shadow-lg ${workspaceFileDragOver ? '**:data-[slot=input-group]:ring-2 **:data-[slot=input-group]:ring-primary/45' : ''}`}
             maxFiles={6}
             maxFileSize={8 * 1024 * 1024}
             multiple
