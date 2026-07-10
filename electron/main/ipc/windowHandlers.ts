@@ -223,6 +223,11 @@ export function registerWindowHandlers(ctx: MainProcessContext): void {
     return true
   })
 
+  ipcMain.handle('window:focusMainWindow', async (_event, route?: string) => {
+    ctx.getWindowManager().focusMainWindow(typeof route === 'string' ? route : undefined)
+    return true
+  })
+
   ipcMain.handle('window:openMomentsWindow', async (_event, filterUsername?: string) => {
     ctx.getWindowManager().openMomentsWindow(filterUsername)
     return true

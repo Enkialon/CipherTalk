@@ -407,6 +407,8 @@ export default function AgentPage() {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const { speakingKey: speakingMessageId, speak: speakMessage, stop: stopSpeakingMessage } = useTtsSpeaker()
   const promptInputControllerRef = useRef<PromptInputControllerProps | null>(null)
+  // 跨窗口自动运行（聊天窗口「AI 摘要」）：待发送的提示词，等 @提及状态落地后由下方 effect 自动提交
+  const [pendingAutoRun, setPendingAutoRun] = useState<string | null>(null)
   const selectedPreset = useMemo(
     () => presets.find((preset) => preset.id === selectedPresetId) || null,
     [presets, selectedPresetId]
@@ -1515,6 +1517,30 @@ export default function AgentPage() {
     setRecordsOpen(false)
   }, [applyConversationId, busy, cancelLocalAgentRun, localAgentRunning, setMessages, stop])
 
+  // 跨窗口自动运行（聊天窗口「AI 摘要」）：经 localStorage 递入 {text, mention}，
+  // 消费后新建对话并 @目标会话，实际发送由下方 pendingAutoRun effect 完成；
+  // storage 事件覆盖"AI 助手页已挂载"的情况。写入 sessionStorage 的新对话标记
+  // 会让恢复上次对话的逻辑短路，不会被旧会话覆盖。
+  useEffect(() => {
+    const consumeAutoRun = () => {
+      const raw = localStorage.getItem('agent:pendingAutoRun')
+      if (!raw) return
+      localStorage.removeItem('agent:pendingAutoRun')
+      try {
+        const payload = JSON.parse(raw) as { text?: string; mention?: { username?: string; displayName?: string; avatarUrl?: string } }
+        if (!payload.text || !payload.mention?.username) return
+        handleNewConversation()
+        setMentions([toMentionTarget(payload.mention.username, payload.mention.displayName, payload.mention.avatarUrl)])
+        setPendingAutoRun(payload.text)
+      } catch {
+        // 载荷损坏时静默丢弃
+      }
+    }
+    consumeAutoRun()
+    window.addEventListener('storage', consumeAutoRun)
+    return () => window.removeEventListener('storage', consumeAutoRun)
+  }, [handleNewConversation])
+
   const handleOpenRecord = useCallback((record: AgentConversationRecord) => {
     if (busy) void stop()
     if (localAgentRunning) void cancelLocalAgentRun()
@@ -1893,6 +1919,16 @@ export default function AgentPage() {
       throw error
     }
   }
+
+  // 跨窗口自动运行的实际发送：等 @提及状态落地、且没有进行中的运行后走正常提交管线
+  useEffect(() => {
+    if (!pendingAutoRun) return
+    if (busy || localAgentRunning || agentRunPending) return
+    if (mentions.length === 0) return
+    setPendingAutoRun(null)
+    void handleSubmit({ text: pendingAutoRun, files: [] })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleSubmit 每次渲染都重建，纳入依赖会让 effect 每帧空跑
+  }, [pendingAutoRun, mentions, busy, localAgentRunning, agentRunPending])
 
   // 三个都用 messagesRef.current 而不是闭包里的 messages：后者每次流式 tick 都变，
   // 会导致这几个回调的引用跟着每 tick 重建，直接传给逐条消息的 memo 组件时白白让它们全部重渲染。

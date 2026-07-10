@@ -78,6 +78,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     toggleDesktopWindow: (enabled: boolean) => ipcRenderer.invoke('pet:toggleDesktopWindow', enabled) as Promise<{ success: boolean }>,
     setBubble: (expanded: boolean) => ipcRenderer.send('pet:setBubble', expanded),
     showContextMenu: () => ipcRenderer.send('pet:showContextMenu'),
+    dragStart: () => ipcRenderer.send('pet:dragStart'),
+    dragMove: (dx: number, dy: number) => ipcRenderer.send('pet:dragMove', dx, dy),
     onAgentState: (callback: (state: string) => void) => {
       const listener = (_: any, state: string) => callback(state)
       ipcRenderer.on('pet:agentState', listener)
@@ -488,6 +490,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     maximize: () => ipcRenderer.send('window:maximize'),
     close: () => ipcRenderer.send('window:close'),
     openChatWindow: () => ipcRenderer.invoke('window:openChatWindow'),
+    focusMainWindow: (route?: string) => ipcRenderer.invoke('window:focusMainWindow', route),
     openMomentsWindow: (filterUsername?: string) => ipcRenderer.invoke('window:openMomentsWindow', filterUsername),
     openPersonaChatWindow: (sessionId: string) => ipcRenderer.invoke('window:openPersonaChatWindow', sessionId),
     openPosterStyleWindow: () => ipcRenderer.invoke('window:openPosterStyleWindow'),

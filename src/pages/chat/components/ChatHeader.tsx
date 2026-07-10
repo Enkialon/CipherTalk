@@ -1,4 +1,4 @@
-import { Aperture, ArrowDownToLine, ArrowsRotateLeft, Bell, BellSlash, Bulb, CircleCheck, CircleDashed, CircleInfo, FaceRobot, FileText, Layers, LayoutSideContentRight, Microphone, Picture, Sparkles } from '@gravity-ui/icons'
+import { Aperture, ArrowDownToLine, ArrowsRotateLeft, Bell, BellSlash, Bulb, CircleCheck, CircleDashed, CircleInfo, Ellipsis, FaceRobot, FileText, Layers, LayoutSideContentRight, MagicWand, Microphone, Picture, Sparkles } from '@gravity-ui/icons'
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Drawer, Dropdown, Label, Switch, Tooltip } from '@heroui/react'
 import { CloneSelfModal } from './CloneSelfModal'
@@ -359,6 +359,29 @@ export function ChatHeader({
       ]
     : []
   const sessionDisplayName = contactNickName || currentSession.username
+
+  // AI摘要：{提示词+@目标} 经 localStorage 递给主窗口 AI 助手页（AgentPage 侧消费：新建对话+@+自动发送），再唤起主窗口
+  const handleAiSummary = (rangeText: string) => {
+    const target = isGroupChat(currentSession.username)
+      ? `群聊「${sessionDisplayName}」`
+      : `我和「${sessionDisplayName}」`
+    const prompt = `请总结${target}${rangeText}的聊天记录。
+
+要求：
+1. 按主题归纳主要讨论内容和关键结论。
+2. 标出重要事项、待办、承诺和情绪变化。
+3. 引用关键原话或聊天片段作为依据，不要凭空推断。
+4. 如果该时间段没有聊天记录，请直接说明。`
+    localStorage.setItem('agent:pendingAutoRun', JSON.stringify({
+      text: prompt,
+      mention: {
+        username: currentSession.username,
+        displayName: sessionDisplayName,
+        avatarUrl: currentSession.avatarUrl,
+      },
+    }))
+    void window.electronAPI.window.focusMainWindow('/agent')
+  }
   // 仅私聊可开消息提醒（排除群聊/公众号）
   const isPrivateSession = !isGroupChat(currentSession.username)
     && !currentSession.username.startsWith('gh_')
@@ -536,6 +559,36 @@ export function ChatHeader({
           <Tooltip.Content placement="bottom">{vecTooltip}</Tooltip.Content>
         </Tooltip>
 
+        <Tooltip delay={0}>
+          <Tooltip.Trigger>
+            <Dropdown>
+              <Button
+                isIconOnly
+                size="sm"
+                variant="ghost"
+                aria-label="AI 摘要"
+                isDisabled={!currentSessionId}
+              >
+                <MagicWand width={18} height={18} />
+              </Button>
+              <Dropdown.Popover className="min-w-44" placement="bottom end">
+                <Dropdown.Menu onAction={(key) => handleAiSummary(String(key))}>
+                  <Dropdown.Item id="今天" textValue="摘要今天的聊天">
+                    <Label>摘要今天的聊天</Label>
+                  </Dropdown.Item>
+                  <Dropdown.Item id="最近一周" textValue="摘要最近一周">
+                    <Label>摘要最近一周</Label>
+                  </Dropdown.Item>
+                  <Dropdown.Item id="最近一个月" textValue="摘要最近一月">
+                    <Label>摘要最近一月</Label>
+                  </Dropdown.Item>
+                </Dropdown.Menu>
+              </Dropdown.Popover>
+            </Dropdown>
+          </Tooltip.Trigger>
+          <Tooltip.Content placement="bottom">AI 摘要（在 AI 助手中生成）</Tooltip.Content>
+        </Tooltip>
+
         {isPrivateSession && (
           <Tooltip delay={0}>
             <Tooltip.Trigger>
@@ -709,24 +762,6 @@ export function ChatHeader({
           </Tooltip>
         )}
 
-        {isPrivateSession && (
-          <Tooltip delay={0}>
-            <Tooltip.Trigger>
-              <Button
-                isIconOnly
-                size="sm"
-                variant="ghost"
-                aria-label="导出复刻语音样本"
-                onPress={onExportVoiceCloneSample}
-                isDisabled={isExportingVoiceSample || !currentSessionId}
-              >
-                {isExportingVoiceSample ? <CircleDashed width={18} height={18} className="animate-spin" /> : <ArrowDownToLine width={18} height={18} />}
-              </Button>
-            </Tooltip.Trigger>
-            <Tooltip.Content placement="bottom">{isExportingVoiceSample ? '正在导出复刻语音样本' : '导出复刻语音样本（至少 10 秒）'}</Tooltip.Content>
-          </Tooltip>
-        )}
-
         {!isGroupChat(currentSession.username) && (
           <Tooltip delay={0}>
             <Tooltip.Trigger>
@@ -754,38 +789,58 @@ export function ChatHeader({
 
         <Tooltip delay={0}>
           <Tooltip.Trigger>
-            <Button
-              isIconOnly
-              size="sm"
-              variant="ghost"
-              aria-label="批量语音转文字"
-              onPress={onBatchTranscribe}
-              isDisabled={isBatchTranscribing || !currentSessionId}
-            >
-              {isBatchTranscribing ? <CircleDashed width={18} height={18} className="animate-spin" /> : <Microphone width={18} height={18} />}
-            </Button>
+            <Dropdown>
+              <Button
+                isIconOnly
+                size="sm"
+                variant="ghost"
+                aria-label="批量工具"
+              >
+                {(isBatchTranscribing || isBatchDecrypting || isExportingVoiceSample)
+                  ? <CircleDashed width={18} height={18} className="animate-spin" />
+                  : <Ellipsis width={18} height={18} />}
+              </Button>
+              <Dropdown.Popover className="min-w-56" placement="bottom end">
+                <Dropdown.Menu
+                  disabledKeys={[
+                    ...(isBatchTranscribing || !currentSessionId ? ['transcribe'] : []),
+                    ...(isBatchDecrypting || !currentSessionId ? ['decrypt'] : []),
+                    ...(isExportingVoiceSample || !currentSessionId ? ['voiceSample'] : []),
+                  ]}
+                  onAction={(key) => {
+                    if (key === 'transcribe') void onBatchTranscribe()
+                    else if (key === 'decrypt') void onBatchDecrypt()
+                    else if (key === 'voiceSample') void onExportVoiceCloneSample()
+                  }}
+                >
+                  <Dropdown.Item id="transcribe" textValue="批量语音转文字">
+                    <Microphone className="size-4 shrink-0 text-muted" />
+                    <Label>批量语音转文字</Label>
+                    {isBatchTranscribing && (
+                      <span className="ml-auto text-muted-foreground text-xs">{batchTranscribeProgress.current}/{batchTranscribeProgress.total}</span>
+                    )}
+                  </Dropdown.Item>
+                  <Dropdown.Item id="decrypt" textValue="批量解密图片">
+                    <Picture className="size-4 shrink-0 text-muted" />
+                    <Label>批量解密图片</Label>
+                    {isBatchDecrypting && (
+                      <span className="ml-auto text-muted-foreground text-xs">{batchDecryptProgress.current}/{batchDecryptProgress.total}</span>
+                    )}
+                  </Dropdown.Item>
+                  {isPrivateSession && (
+                    <Dropdown.Item id="voiceSample" textValue="导出复刻语音样本">
+                      <ArrowDownToLine className="size-4 shrink-0 text-muted" />
+                      <Label>导出复刻语音样本</Label>
+                      {isExportingVoiceSample && (
+                        <span className="ml-auto text-muted-foreground text-xs">导出中</span>
+                      )}
+                    </Dropdown.Item>
+                  )}
+                </Dropdown.Menu>
+              </Dropdown.Popover>
+            </Dropdown>
           </Tooltip.Trigger>
-          <Tooltip.Content placement="bottom">
-            {isBatchTranscribing ? `批量转写中 (${batchTranscribeProgress.current}/${batchTranscribeProgress.total})` : '批量语音转文字'}
-          </Tooltip.Content>
-        </Tooltip>
-
-        <Tooltip delay={0}>
-          <Tooltip.Trigger>
-            <Button
-              isIconOnly
-              size="sm"
-              variant="ghost"
-              aria-label="批量解密图片"
-              onPress={onBatchDecrypt}
-              isDisabled={isBatchDecrypting || !currentSessionId}
-            >
-              {isBatchDecrypting ? <CircleDashed width={18} height={18} className="animate-spin" /> : <Picture width={18} height={18} />}
-            </Button>
-          </Tooltip.Trigger>
-          <Tooltip.Content placement="bottom">
-            {isBatchDecrypting ? `批量解密中 (${batchDecryptProgress.current}/${batchDecryptProgress.total})` : '批量解密图片'}
-          </Tooltip.Content>
+          <Tooltip.Content placement="bottom">批量工具</Tooltip.Content>
         </Tooltip>
 
         <Tooltip delay={0}>

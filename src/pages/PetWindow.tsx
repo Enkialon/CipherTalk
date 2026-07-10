@@ -50,9 +50,11 @@ const DEFAULT_BUBBLE_FRAME: BubbleFrame = {
 
 type PointerDownInfo = {
   pointerId: number
-  x: number
-  y: number
+  // 屏幕坐标：拖拽期间窗口在动，client 坐标会漂移，位移必须按 screen 坐标算
+  screenX: number
+  screenY: number
   at: number
+  dragging: boolean
 }
 
 function randomRunId(): string {
@@ -208,31 +210,40 @@ export default function PetWindow() {
     }, PET_STATES[NOTIFY_ACTION].durationMs * 2)
   }, [])
 
+  // 手动拖拽 + 点击判定：app-region: drag 会吞掉左键 DOM 事件（点击永远不触发），
+  // 改为宠物区域 no-drag，按下后位移超过阈值走 IPC 移窗，否则按点击处理
   const handlePetPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     if ((event.target as HTMLElement).closest('button')) return
     pointerDownRef.current = {
       pointerId: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
+      screenX: event.screenX,
+      screenY: event.screenY,
       at: performance.now(),
+      dragging: false,
     }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    window.electronAPI.pet.dragStart()
   }, [])
 
   const handlePetPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const down = pointerDownRef.current
     if (!down || down.pointerId !== event.pointerId) return
-    const distance = Math.hypot(event.clientX - down.x, event.clientY - down.y)
-    if (distance > SHORT_CLICK_MAX_DISTANCE) pointerDownRef.current = null
+    const dx = event.screenX - down.screenX
+    const dy = event.screenY - down.screenY
+    if (!down.dragging && Math.hypot(dx, dy) <= SHORT_CLICK_MAX_DISTANCE) return
+    down.dragging = true
+    window.electronAPI.pet.dragMove(dx, dy)
   }, [])
 
   const handlePetPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const down = pointerDownRef.current
     pointerDownRef.current = null
     if (!down || down.pointerId !== event.pointerId) return
-    const elapsed = performance.now() - down.at
-    const distance = Math.hypot(event.clientX - down.x, event.clientY - down.y)
-    if (elapsed <= SHORT_CLICK_MAX_MS && distance <= SHORT_CLICK_MAX_DISTANCE) {
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    } catch { /* 已释放 */ }
+    if (!down.dragging && performance.now() - down.at <= SHORT_CLICK_MAX_MS) {
       triggerClickJump()
       setChatOpen((open) => !open)
     }
@@ -507,7 +518,7 @@ export default function PetWindow() {
     ?? (agentState === 'idle' && hoverFlair ? hoverFlair : agentState === 'idle' && flair ? flair : petStateForAgent(agentState))
 
   const petStageStyle: React.CSSProperties = {
-    WebkitAppRegion: 'drag',
+    WebkitAppRegion: 'no-drag',
     background: 'transparent',
     height: bubbleFrame.baseHeight,
     position: 'absolute',

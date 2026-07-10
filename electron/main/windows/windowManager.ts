@@ -303,6 +303,8 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
   let petBubbleExpanded = false
   // 程序化 setBounds 会触发 'move'，用时间窗抑制，避免桌宠误判成拖动而播跑动画
   let petSuppressMoveUntil = 0
+  // 手动拖拽起点：pet:dragStart 时的窗口位置，dragMove 的位移以此为基准
+  let petDragOrigin: { x: number; y: number } | null = null
   let lastPetContextMenuAt = 0
 
   const closePetWindowInternal = (): void => {
@@ -1452,7 +1454,7 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
         return petWindow
       }
 
-      // 默认落在主屏右下角（任务栏上方），透明无边框，靠 CSS app-region 拖动
+      // 默认落在主屏右下角（任务栏上方），透明无边框；宠物区域走手动拖拽（pet:dragStart/dragMove），空白边缘仍是 app-region 拖动
       const { workArea } = screen.getPrimaryDisplay()
       const width = 150
       const height = 170
@@ -1522,6 +1524,20 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
 
     showPetContextMenu() {
       showPetContextMenu()
+    },
+
+    // 手动拖拽（代替 app-region: drag——它会吞掉宠物区域的左键 DOM 事件，点击对话打不开）：
+    // 按下时记录窗口原点，move 传按下点起算的累计位移
+    petDragStart() {
+      if (!petWindow || petWindow.isDestroyed()) return
+      const [x, y] = petWindow.getPosition()
+      petDragOrigin = { x, y }
+    },
+
+    petDragMove(dx: number, dy: number) {
+      if (!petWindow || petWindow.isDestroyed() || !petDragOrigin) return
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) return
+      petWindow.setPosition(Math.round(petDragOrigin.x + dx), Math.round(petDragOrigin.y + dy))
     },
 
     // 显示消息气泡时向右下角锚点扩窗腾出气泡空间，气泡消失后还原。仅尺寸变化，桌宠仍停在原处。

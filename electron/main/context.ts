@@ -69,6 +69,8 @@ export interface WindowManager {
   closePetWindow(): void
   isPetWindowOpen(): boolean
   showPetContextMenu(): void
+  petDragStart(): void
+  petDragMove(dx: number, dy: number): void
   setPetBubbleExpanded(expanded: boolean): void
   /** 全局磁贴总开关：开=常驻贴微信旁 + 启动后台生成；关=关闭磁贴 + 停后台 */
   setReplyTileEnabled(enabled: boolean): void

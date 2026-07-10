@@ -494,6 +494,7 @@ export interface ElectronAPI {
     splashReady: () => void
     onSplashFadeOut?: (callback: () => void) => () => void
     openChatWindow: () => Promise<boolean>
+    focusMainWindow: (route?: string) => Promise<boolean>
     openMomentsWindow: (filterUsername?: string) => Promise<boolean>
     openPersonaChatWindow: (sessionId: string) => Promise<boolean>
     openPosterStyleWindow: () => Promise<boolean>
@@ -567,6 +568,8 @@ export interface ElectronAPI {
     toggleDesktopWindow: (enabled: boolean) => Promise<{ success: boolean }>
     setBubble: (expanded: boolean) => void
     showContextMenu: () => void
+    dragStart: () => void
+    dragMove: (dx: number, dy: number) => void
     onAgentState: (callback: (state: string) => void) => () => void
     onWindowMove: (callback: (x: number) => void) => () => void
     onBubbleFrame: (callback: (frame: { expanded: boolean; baseLeft: number; baseTop: number; baseWidth: number; baseHeight: number }) => void) => () => void

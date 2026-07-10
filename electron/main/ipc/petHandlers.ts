@@ -153,6 +153,15 @@ export function registerPetHandlers(ctx: MainProcessContext): void {
     ctx.getWindowManager().showPetContextMenu()
   })
 
+  // 桌宠手动拖拽：dragStart 记录窗口原点，dragMove 传按下点起算的累计位移
+  ipcMain.on('pet:dragStart', () => {
+    ctx.getWindowManager().petDragStart()
+  })
+
+  ipcMain.on('pet:dragMove', (_, dx: number, dy: number) => {
+    ctx.getWindowManager().petDragMove(Number(dx), Number(dy))
+  })
+
   ipcMain.handle('pet:toggleDesktopWindow', async (_, enabled: boolean) => {
     const manager = ctx.getWindowManager()
     if (enabled) manager.openPetWindow()
