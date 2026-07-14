@@ -123,6 +123,12 @@ function AgentMessageItemImpl({
     ? (isLastMessage && subAgentProgress.length > 0 ? subAgentProgress : persistedSubAgentEvents)
     : []
   const orderedSegments = buildRenderSegments(message.parts)
+  const chainSegmentCount = orderedSegments.reduce((count, segment) => count + (segment.kind === 'chain' ? 1 : 0), 0)
+  const lastChainSegmentIndex = orderedSegments.reduce(
+    (lastIndex, segment, index) => segment.kind === 'chain' ? index : lastIndex,
+    -1,
+  )
+  const persistedSingleChainElapsedMs = chainSegmentCount === 1 ? persistedProcessingElapsedMs : undefined
   const userFileParts = message.role === 'user'
     ? message.parts
       .map((part, index) => ({ part, index }))
@@ -183,7 +189,7 @@ function AgentMessageItemImpl({
     <MessageChainOfThought
       active={segmentActive}
       key={`chain-${segment[0]?.index ?? 0}`}
-      persistedElapsedMs={persistedProcessingElapsedMs}
+      persistedElapsedMs={persistedSingleChainElapsedMs}
     >
       {segment.map(({ part, index }) => {
         if (part.type === 'reasoning') {
@@ -267,8 +273,8 @@ function AgentMessageItemImpl({
           {orderedSegments.map((segment, segmentIndex) => {
             const isLastSegment = segmentIndex === orderedSegments.length - 1
             if (segment.kind === 'chain') {
-              // 整轮运行期间过程保持展开；只有最终回答完全结束后，才统一收进“已处理”。
-              const segmentActive = chainActive
+              // 每个过程区块独立计时；新过程出现后，前一个区块立即冻结为“已处理”。
+              const segmentActive = chainActive && segmentIndex === lastChainSegmentIndex
               return (
                 <div className="space-y-2" key={`chain-${segment.items[0]?.index ?? 0}`}>
                   {renderChainSegment(segment.items, segmentActive)}

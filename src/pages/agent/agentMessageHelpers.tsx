@@ -27,6 +27,7 @@ export const TOOL_LABELS: Record<string, string> = {
   semantic_search: '语义检索聊天记录',
   get_context: '查看上下文',
   get_timeline: '查看时间线',
+  transcribe_voice_message: '转写语音消息',
   chat_stats: '聊天统计',
   list_groups: '查看群聊列表',
   group_members: '查看群成员',

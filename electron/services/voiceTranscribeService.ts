@@ -3,13 +3,13 @@
  * 负责模型管理（下载、校验）和转写任务调度
  * 支持转写结果缓存
  */
-import { app } from 'electron'
 import { existsSync, mkdirSync, statSync, unlinkSync, createWriteStream, renameSync, type WriteStream } from 'fs'
 import { join } from 'path'
 import * as https from 'https'
 import * as http from 'http'
 import Database from 'better-sqlite3'
 import { ConfigService } from './config'
+import { getAppDataPath } from './runtimePaths'
 
 // 模型信息
 interface ModelInfo {
@@ -112,7 +112,7 @@ export class VoiceTranscribeService {
     private initCacheDb(): void {
         try {
             const cachePath = this.configService.get('cachePath')
-            const cacheDir = cachePath || join(app.getPath('appData'), 'ciphertalk')
+            const cacheDir = cachePath || join(getAppDataPath(), 'ciphertalk')
 
             if (!existsSync(cacheDir)) {
                 mkdirSync(cacheDir, { recursive: true })
@@ -246,7 +246,7 @@ export class VoiceTranscribeService {
     private resolveModelDir(): string {
         // 强制使用 APPDATA 目录，避免中文路径问题
         // Windows: C:\Users\<username>\AppData\Roaming\ciphertalk\models\sensevoice
-        return join(app.getPath('appData'), 'ciphertalk', 'models', 'sensevoice')
+        return join(getAppDataPath(), 'ciphertalk', 'models', 'sensevoice')
     }
 
     /**

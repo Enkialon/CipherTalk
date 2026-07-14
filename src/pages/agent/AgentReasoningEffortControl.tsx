@@ -190,7 +190,7 @@ export function AgentReasoningEffortControl({ value, onChange }: AgentReasoningE
                     size="sm"
                     variant="ghost"
                   >
-                    <CircleQuestion aria-hidden className="size-[1.125rem]" />
+                    <CircleQuestion aria-hidden className="size-4.5" />
                   </Button>
                 </Tooltip.Trigger>
                 <Tooltip.Content placement="top end">强度越高，回答通常越深入，但响应更慢、消耗更多</Tooltip.Content>

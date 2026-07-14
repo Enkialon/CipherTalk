@@ -2637,14 +2637,14 @@ export default function AgentPage() {
                               return (
                                 <Dropdown.SubmenuTrigger key={model.id}>
                                   <Dropdown.Item
-                                    className="group data-[selected]:bg-muted/70 data-[selected]:text-foreground"
+                                    className="group data-selected:bg-muted/70 data-selected:text-foreground"
                                     id={model.id}
                                     onHoverStart={() => ensureEntryModels(model)}
                                     textValue={model.name}
                                   >
                                     <span
                                       aria-hidden="true"
-                                      className="h-5 w-0.5 shrink-0 rounded-full bg-transparent transition-colors group-data-[selected]:bg-accent"
+                                      className="h-5 w-0.5 shrink-0 rounded-full bg-transparent transition-colors group-data-selected:bg-accent"
                                     />
                                     {model.chefSlug && <AIProviderLogo providerId={model.chefSlug} alt={model.chef} className="shrink-0" size={20} />}
                                     <Label className="min-w-0 flex-1 truncate text-left">{model.name}</Label>
