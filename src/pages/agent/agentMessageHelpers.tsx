@@ -109,6 +109,46 @@ export function formatToolName(toolName: string) {
   return TOOL_LABELS[toolName] ?? toolName.replace(/[_-]+/g, ' ')
 }
 
+const COMMAND_TOOL_NAMES = new Set(['code_run_command', 'run_command'])
+
+export function isCommandTool(toolName: string) {
+  return COMMAND_TOOL_NAMES.has(toolName)
+}
+
+function formatCommandArg(value: unknown) {
+  const text = String(value)
+  return !text || /[\s"']/.test(text) ? JSON.stringify(text) : text
+}
+
+function commandTextFrom(value: unknown): string {
+  if (typeof value === 'string') return value.trim()
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return ''
+  const record = value as Record<string, unknown>
+  const commandLine = typeof record.commandLine === 'string' ? record.commandLine.trim() : ''
+  if (commandLine) return commandLine
+  const command = typeof record.command === 'string' ? record.command.trim() : ''
+  if (!command) return ''
+  const args = Array.isArray(record.args) ? record.args.map(formatCommandArg) : []
+  return [command, ...args].join(' ')
+}
+
+function commandOutputFailed(output: unknown) {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return false
+  const record = output as Record<string, unknown>
+  if (record.success === false) return true
+  const status = typeof record.status === 'string' ? record.status.toLowerCase() : ''
+  return ['failed', 'error', 'timed_out', 'cancelled', 'canceled'].includes(status)
+}
+
+export function formatToolStepLabel(toolName: string, state: string | undefined, input?: unknown, output?: unknown) {
+  if (!isCommandTool(toolName)) return formatToolName(toolName)
+  const command = commandTextFrom(input) || commandTextFrom(output)
+  const failed = state === 'output-error' || commandOutputFailed(output)
+  const done = state === 'output-available'
+  const prefix = failed ? '运行失败' : done ? '已运行' : '正在运行'
+  return command ? `${prefix} ${command}` : `${prefix}命令`
+}
+
 // ====== 工具审批一行动态说明（输入框上方审批条用）======
 // 通用兜底：不为每个工具写专属映射，按常见字段名取第一个命中的当关键信息
 const APPROVAL_DETAIL_KEYS = ['title', 'command', 'filePath', 'media', 'path', 'query', 'sessionId', 'md5', 'name']

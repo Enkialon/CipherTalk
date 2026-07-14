@@ -151,9 +151,11 @@ export function AgentReasoningEffortControl({ value, onChange }: AgentReasoningE
     <Popover>
       <Button
         aria-label={`思考强度：${selectedEffort.label}`}
-        className={committedIsMax ? 'text-accent' : undefined}
+        className={committedIsMax
+          ? 'ct-agent-trigger-button pl-1.5 [--button-fg:var(--accent)]'
+          : 'ct-agent-trigger-button pl-1.5'}
         size="sm"
-        variant="tertiary"
+        variant="ghost"
       >
         <Bulb aria-hidden className="size-3.5 shrink-0" />
         <span className="text-xs">{reasoningEffortLabel(selectedEffort.value, true)}</span>

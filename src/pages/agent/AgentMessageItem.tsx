@@ -12,7 +12,7 @@
  */
 import { memo } from 'react'
 import { Button as HeroButton } from '@heroui/react'
-import { Magnifier, Persons, Play, Wrench } from '@gravity-ui/icons'
+import { Magnifier, Persons, Play, Terminal, Wrench } from '@gravity-ui/icons'
 import type { ChatStatus, UIMessage } from 'ai'
 import {
   ChainOfThoughtSearchResult,
@@ -36,9 +36,10 @@ import {
   collectToolBadges,
   extractSources,
   formatElapsed,
-  formatToolName,
+  formatToolStepLabel,
   getDelegateTasks,
   isAgentChainPart,
+  isCommandTool,
   planRequiresDelegateAnalysis,
   pushBadge,
   renderChainLabel,
@@ -204,7 +205,7 @@ function AgentMessageItemImpl({
         }
         const done = part.state === 'output-available' || part.state === 'output-error'
         const toolActive = segmentActive && !done
-        const toolLabel = formatToolName(toolName)
+        const toolLabel = formatToolStepLabel(toolName, part.state, part.input, part.output)
         const elapsedMs = toolElapsedByKey[toolPartProgressKey(part, toolName)]
         const label = [
           toolLabel,
@@ -218,7 +219,7 @@ function AgentMessageItemImpl({
         }
         return (
           <ChainOfThoughtStep
-            icon={toolName.includes('search') ? Magnifier : Wrench}
+            icon={toolName.includes('search') ? Magnifier : isCommandTool(toolName) ? Terminal : Wrench}
             key={`chain-${index}`}
             label={renderChainLabel(label, toolActive)}
             status={toolActive ? 'active' : 'complete'}
