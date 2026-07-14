@@ -425,9 +425,10 @@ const apiRegistry: Record<string, { permission: PluginPermission | null; handler
       if (!sessionId || !Number.isFinite(localId) || !Number.isFinite(createTime)) {
         throw new Error('sessionId、localId、createTime 必填')
       }
-      // 命中缓存直接返回，不重复转写
-      const cached = voiceTranscribeService.getCachedTranscript(sessionId, createTime)
-      if (cached && args.force !== true) return { text: cached, fromCache: true }
+      // 命中缓存直接返回，不重复转写（空结果也算命中，避免重复扣额度）
+      if (args.force !== true && voiceTranscribeService.hasCachedTranscript(sessionId, createTime)) {
+        return { text: voiceTranscribeService.getCachedTranscript(sessionId, createTime) ?? '', fromCache: true }
+      }
 
       const voice = await chatService.getVoiceData(
         sessionId,

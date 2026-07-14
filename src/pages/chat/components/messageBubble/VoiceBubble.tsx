@@ -263,6 +263,8 @@ function VoiceBubble({ message, session, isSent, onContextMenu }: VoiceBubblePro
 
       if (result.success && result.transcript) {
         setSttTranscript(result.transcript)
+      } else if (result.success && result.cached) {
+        setSttError('转写结果为空（已缓存，右键可重新转写）')
       } else {
         setSttError(result.error || '转写失败')
       }

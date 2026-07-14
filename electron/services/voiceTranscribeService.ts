@@ -4,12 +4,13 @@
  * 支持转写结果缓存
  */
 import { app } from 'electron'
-import { existsSync, mkdirSync, statSync, unlinkSync, createWriteStream, renameSync, type WriteStream } from 'fs'
-import { join } from 'path'
+import { existsSync, mkdirSync, realpathSync, statSync, unlinkSync, createWriteStream, renameSync, type WriteStream } from 'fs'
+import { dirname, join } from 'path'
 import * as https from 'https'
 import * as http from 'http'
 import Database from 'better-sqlite3'
 import { ConfigService } from './config'
+import { getUserDataPath } from './runtimePaths'
 
 // 模型信息
 interface ModelInfo {
@@ -80,6 +81,8 @@ export class VoiceTranscribeService {
     private downloadTasks = new Map<string, Promise<{ success: boolean; modelPath?: string; tokensPath?: string; error?: string }>>()
     private downloadCancels = new Map<string, DownloadCancelState>()
     private cacheDb: Database.Database | null = null
+    /** 稳定主缓存路径（不跟账号 cachePath 走，避免换目录后整批重转写） */
+    private cacheDbPath: string | null = null
 
     constructor() {
         this.initCacheDb()
@@ -107,18 +110,125 @@ export class VoiceTranscribeService {
     }
 
     /**
+     * 转写缓存固定落在 app userData，不跟微信账号的 cachePath。
+     * 旧版本曾把 stt-cache.db 写到 cachePath 或 appData/ciphertalk，启动时会合并进来。
+     */
+    private resolvePrimaryCacheDbPath(): string {
+        return join(getUserDataPath(), 'stt-cache.db')
+    }
+
+    private resolveLegacyCacheDbPaths(primaryPath: string): string[] {
+        const candidates: string[] = []
+        try {
+            candidates.push(join(app.getPath('appData'), 'ciphertalk', 'stt-cache.db'))
+        } catch {
+            // app 未就绪时跳过
+        }
+        try {
+            candidates.push(join(app.getPath('userData'), 'stt-cache.db'))
+        } catch {
+            // ignore
+        }
+        const accountCachePath = String(this.configService.get('cachePath') || '').trim()
+        if (accountCachePath) {
+            candidates.push(join(accountCachePath, 'stt-cache.db'))
+        }
+
+        const primaryReal = this.safeRealpath(primaryPath)
+        const seen = new Set<string>()
+        const result: string[] = []
+        for (const p of candidates) {
+            if (!p || !existsSync(p)) continue
+            const real = this.safeRealpath(p) || p
+            if (primaryReal && real === primaryReal) continue
+            if (seen.has(real)) continue
+            seen.add(real)
+            result.push(p)
+        }
+        return result
+    }
+
+    private safeRealpath(filePath: string): string | null {
+        try {
+            return realpathSync(filePath)
+        } catch {
+            return null
+        }
+    }
+
+    /**
+     * 把旧路径里的转写结果合并进主库（INSERT OR IGNORE，不覆盖已有）。
+     */
+    private mergeLegacyCacheDb(legacyPath: string): number {
+        if (!this.cacheDb || !existsSync(legacyPath)) return 0
+        let legacy: Database.Database | null = null
+        try {
+            legacy = new Database(legacyPath, { readonly: true, fileMustExist: true })
+            const hasTable = legacy.prepare(
+                "SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='transcript_cache' LIMIT 1"
+            ).get() as { ok?: number } | undefined
+            if (!hasTable) return 0
+
+            const rows = legacy.prepare(
+                'SELECT cache_key, session_id, create_time, transcript, created_at FROM transcript_cache'
+            ).all() as Array<{
+                cache_key: string
+                session_id: string
+                create_time: number
+                transcript: string
+                created_at: number
+            }>
+            if (rows.length === 0) return 0
+
+            const insert = this.cacheDb.prepare(`
+                INSERT OR IGNORE INTO transcript_cache
+                (cache_key, session_id, create_time, transcript, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            `)
+            const merge = this.cacheDb.transaction((items: typeof rows) => {
+                let added = 0
+                for (const row of items) {
+                    const sessionId = this.normalizeSessionId(row.session_id)
+                    const createTime = this.normalizeCreateTime(row.create_time)
+                    const cacheKey = row.cache_key || this.getCacheKey(sessionId, createTime)
+                    const transcript = String(row.transcript || '')
+                    if (!transcript) continue
+                    const info = insert.run(
+                        cacheKey,
+                        sessionId,
+                        createTime,
+                        transcript,
+                        Number(row.created_at) || Date.now(),
+                    )
+                    added += info.changes
+                }
+                return added
+            })
+            const added = merge(rows)
+            if (added > 0) {
+                console.log(`[VoiceTranscribe] 已从旧缓存合并 ${added} 条转写: ${legacyPath}`)
+            }
+            return added
+        } catch (e) {
+            console.error('[VoiceTranscribe] 合并旧转写缓存失败:', legacyPath, e)
+            return 0
+        } finally {
+            try { legacy?.close() } catch { /* ignore */ }
+        }
+    }
+
+    /**
      * 初始化缓存数据库
      */
     private initCacheDb(): void {
         try {
-            const cachePath = this.configService.get('cachePath')
-            const cacheDir = cachePath || join(app.getPath('appData'), 'ciphertalk')
-
+            const dbPath = this.resolvePrimaryCacheDbPath()
+            const cacheDir = dirname(dbPath)
             if (!existsSync(cacheDir)) {
                 mkdirSync(cacheDir, { recursive: true })
             }
 
-            const dbPath = join(cacheDir, 'stt-cache.db')
+            this.cacheDbPath = dbPath
             this.cacheDb = new Database(dbPath)
 
             // 创建缓存表
@@ -138,22 +248,52 @@ export class VoiceTranscribeService {
                 ON transcript_cache(session_id, create_time)
             `)
 
-
+            // 合并历史碎片缓存，避免「以前转过、换目录后又全量重转」
+            for (const legacyPath of this.resolveLegacyCacheDbPaths(dbPath)) {
+                this.mergeLegacyCacheDb(legacyPath)
+            }
         } catch (e) {
             console.error('[VoiceTranscribe] 缓存数据库初始化失败:', e)
             this.cacheDb = null
+            this.cacheDbPath = null
         }
+    }
+
+    private normalizeSessionId(sessionId: string): string {
+        return String(sessionId || '').trim()
+    }
+
+    private normalizeCreateTime(createTime: number): number {
+        const n = Number(createTime)
+        return Number.isFinite(n) ? Math.trunc(n) : 0
     }
 
     /**
      * 生成缓存 key
      */
     private getCacheKey(sessionId: string, createTime: number): string {
-        return `${sessionId}:${createTime}`
+        return `${this.normalizeSessionId(sessionId)}:${this.normalizeCreateTime(createTime)}`
     }
 
     /**
-     * 查询缓存
+     * 是否已有转写缓存（含空结果占位；用于跳过重复 STT，与「有无可用文本」分开）。
+     */
+    hasCachedTranscript(sessionId: string, createTime: number): boolean {
+        if (!this.cacheDb) return false
+        try {
+            const cacheKey = this.getCacheKey(sessionId, createTime)
+            const row = this.cacheDb.prepare(
+                'SELECT 1 AS ok FROM transcript_cache WHERE cache_key = ? LIMIT 1'
+            ).get(cacheKey) as { ok?: number } | undefined
+            return !!row
+        } catch (e) {
+            console.error('[VoiceTranscribe] 查询缓存是否存在失败:', e)
+            return false
+        }
+    }
+
+    /**
+     * 查询缓存。null = 未转写过；空字符串 = 转过但结果为空（仍算已缓存）。
      */
     getCachedTranscript(sessionId: string, createTime: number): string | null {
         if (!this.cacheDb) return null
@@ -165,7 +305,6 @@ export class VoiceTranscribeService {
             ).get(cacheKey) as { transcript: string } | undefined
 
             if (row) {
-
                 return row.transcript
             }
             return null
@@ -176,20 +315,21 @@ export class VoiceTranscribeService {
     }
 
     /**
-     * 保存到缓存
+     * 保存到缓存。allowEmpty=true 时允许写入空串，标记「已尝试、勿重复扣额度」。
      */
-    saveTranscriptCache(sessionId: string, createTime: number, transcript: string): void {
-        if (!this.cacheDb || !transcript) return
+    saveTranscriptCache(sessionId: string, createTime: number, transcript: string, allowEmpty = false): void {
+        if (!this.cacheDb) return
+        if (!transcript && !allowEmpty) return
 
         try {
-            const cacheKey = this.getCacheKey(sessionId, createTime)
+            const normalizedSessionId = this.normalizeSessionId(sessionId)
+            const normalizedCreateTime = this.normalizeCreateTime(createTime)
+            const cacheKey = this.getCacheKey(normalizedSessionId, normalizedCreateTime)
             this.cacheDb.prepare(`
                 INSERT OR REPLACE INTO transcript_cache 
                 (cache_key, session_id, create_time, transcript, created_at)
                 VALUES (?, ?, ?, ?, ?)
-            `).run(cacheKey, sessionId, createTime, transcript, Date.now())
-
-
+            `).run(cacheKey, normalizedSessionId, normalizedCreateTime, transcript || '', Date.now())
         } catch (e) {
             console.error('[VoiceTranscribe] 保存缓存失败:', e)
         }

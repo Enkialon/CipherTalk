@@ -1732,18 +1732,15 @@ export class McpReadService {
       sessionsScanned: 1
     })
 
-    if (!force) {
-      const cached = sttRuntimeService.getCachedTranscript(sessionId, createTime)
-      if (cached) {
-        return {
-          source: 'voice_message',
-          sessionId,
-          localId,
-          createTime,
-          transcript: cached,
-          cached: true,
-          sttMode: sttRuntimeService.getCurrentSttMode()
-        }
+    if (!force && sttRuntimeService.hasCachedTranscript(sessionId, createTime)) {
+      return {
+        source: 'voice_message',
+        sessionId,
+        localId,
+        createTime,
+        transcript: sttRuntimeService.getCachedTranscript(sessionId, createTime) ?? '',
+        cached: true,
+        sttMode: sttRuntimeService.getCurrentSttMode()
       }
     }
 
