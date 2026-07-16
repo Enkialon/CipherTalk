@@ -71,6 +71,9 @@ resources/whisper
 xkey
 .claude/
 .tmp
+.tmp-*.cjs
+.tmp-*.json
+.tmp-*.txt
 Agent示例UI/
 
 # Embedded CLI local outputs

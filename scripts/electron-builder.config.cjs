@@ -16,6 +16,18 @@ function withoutItems(items = [], values = []) {
 
 function getExtraResources(buildTarget) {
   const common = [
+    // utilityProcess 从 app.asar.unpacked/dist-electron 启动，不能依赖它穿透回 app.asar
+    // 解析动态 require；把这两个运行时模块放到 getElectronWorkerEnv() 的 resources/node_modules 路径。
+    {
+      from: 'node_modules/fzstd/',
+      to: 'node_modules/fzstd/',
+      filter: ['**/*']
+    },
+    {
+      from: 'node_modules/zod/',
+      to: 'node_modules/zod/',
+      filter: ['**/*']
+    },
     {
       from: 'electron/assets/',
       to: 'assets/',

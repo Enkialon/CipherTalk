@@ -41,10 +41,14 @@ const result = spawnSync(
   }
 )
 
+if (result.status !== 0) {
+  process.exit(result.status || 1)
+}
+
 // 构建阶段只要求安装包产物存在，自动更新元数据交给后续发布阶段校验。
 const artifactName = target === 'mac'
   ? `release/CipherTalk-${pkg.version}-Setup.dmg`
   : `release/CipherTalk-${pkg.version}-Setup.exe`
 if (!fs.existsSync(path.join(__dirname, '..', artifactName))) {
-  process.exit(result.status || 1)
+  process.exit(1)
 }

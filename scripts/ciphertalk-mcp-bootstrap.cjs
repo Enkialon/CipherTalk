@@ -16,6 +16,19 @@ function getAppAsarPath() {
 
 const appAsarPath = getAppAsarPath();
 
+// MCP 入口在 app.asar.unpacked 中，但普通依赖仍位于 app.asar/node_modules。
+// Node 从解包目录向上查找时不会跨进 app.asar，显式补充模块搜索路径。
+const runtimeNodePaths = [
+  path.join(appDir, "resources", "app.asar.unpacked", "node_modules"),
+  path.join(appDir, "resources", "node_modules"),
+  path.join(appAsarPath, "node_modules"),
+];
+const inheritedNodePaths = process.env.NODE_PATH
+  ? process.env.NODE_PATH.split(path.delimiter).filter(Boolean)
+  : [];
+process.env.NODE_PATH = [...new Set([...runtimeNodePaths, ...inheritedNodePaths])].join(path.delimiter);
+Module._initPaths();
+
 function getUserDataPath() {
   if (process.platform === "darwin") {
     return path.join(os.homedir(), "Library", "Application Support", "ciphertalk");

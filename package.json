@@ -18,7 +18,7 @@
     "build:prepare:mac": "node scripts/patch-dmg-builder.cjs",
     "build:prepare": "node scripts/update-readme-version.js && node scripts/prepare-release-announcement.js",
     "prebuild": "node scripts/update-readme-version.js && node scripts/prepare-release-announcement.js",
-    "build": "node scripts/clean-dist-electron.cjs && NODE_OPTIONS=\"--max-old-space-size=4096\" tsc && vite build && electron-builder && node scripts/add-size-to-yml.js",
+    "build": "node scripts/clean-dist-electron.cjs && cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc && vite build && electron-builder && node scripts/add-size-to-yml.js",
     "build:win": "npm run build:prepare && node scripts/clean-dist-electron.cjs && tsc && vite build && node scripts/run-electron-builder.cjs win && node scripts/generate-update-manifest.js win && node scripts/add-size-to-yml.js",
     "build:mac": "npm run build:prepare && npm run native:macos:check && npm run build:prepare:mac && node scripts/clean-dist-electron.cjs && tsc && vite build && node scripts/run-electron-builder.cjs mac && node scripts/generate-update-manifest.js mac && node scripts/add-size-to-yml.js",
     "build:ci": "node scripts/prepare-release-announcement.js && node scripts/clean-dist-electron.cjs && tsc && vite build && electron-builder --publish never && node scripts/generate-update-manifest.js && node scripts/add-size-to-yml.js",
@@ -41,7 +41,7 @@
     "preview": "vite preview",
     "electron:dev": "node scripts/clean-dist-electron.cjs && vite --mode electron",
     "electron:build": "npm run build",
-    "postinstall": "electron-rebuild"
+    "postinstall": "electron-rebuild --build-from-source"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.11",
@@ -117,6 +117,7 @@
     "@types/react-window": "^1.8.8",
     "@vitejs/plugin-react": "^4.3.4",
     "antd": "^6.4.3",
+    "cross-env": "^10.1.0",
     "dom-to-image-more": "^3.7.2",
     "dompurify": "^3.3.1",
     "electron": "^39.6.0",
@@ -125,6 +126,7 @@
     "es-toolkit": "^1.46.1",
     "marked": "^17.0.1",
     "motion": "^12.40.0",
+    "node-abi": "^4.33.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-router-dom": "^7.1.1",
@@ -276,7 +278,9 @@
       "node_modules/@fast-csv/*/build/**/*",
       "node_modules/fast-csv/build/**/*",
       "!node_modules/**/deps/**/*",
-      "node_modules/koffi/build/**/*"
+      "node_modules/koffi/build/**/*",
+      "node_modules/fzstd/**/*",
+      "node_modules/zod/**/*"
     ],
     "asarUnpack": [
       "node_modules/ffmpeg-static/**/*",
