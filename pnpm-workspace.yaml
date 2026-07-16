@@ -1,0 +1,8 @@
+allowBuilds:
+  '@parcel/watcher': true
+  better-sqlite3: true
+  electron: true
+  esbuild: true
+  ffmpeg-static: true
+  koffi: true
+  sharp: true
